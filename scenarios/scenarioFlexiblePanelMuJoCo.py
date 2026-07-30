@@ -24,6 +24,7 @@ def plotBendingAngles(timeAxis: np.ndarray, theta: list, numberOfSegments: int) 
     plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel(r'$\theta$ [deg]')
+    plt.title("Bending Angles", fontsize="22")
 
     return fig
 
@@ -40,6 +41,7 @@ def plotTorsionalAngles(timeAxis: np.ndarray, beta: list, numberOfSegments: int)
     plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel(r'$\beta$ [deg]')
+    plt.title("Torsional Angles", fontsize="22")
 
     return fig
 
@@ -56,6 +58,7 @@ def plotBendingAngleRates(timeAxis: np.ndarray, thetaDot: list, numberOfSegments
     plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel(r'$\dot{\theta}$ [deg/s]')
+    plt.title("Bending Angle Rates", fontsize="22")
 
     return fig
 
@@ -72,6 +75,7 @@ def plotTorsionalAngleRates(timeAxis: np.ndarray, betaDot: list, numberOfSegment
     plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel(r'$\dot{\beta}$ [deg/s]')
+    plt.title("Torsional Angle Rates", fontsize="22")
 
     return fig
 
@@ -88,6 +92,7 @@ def plotAttitudeError(timeAxis: np.ndarray, sigma_BR: np.ndarray) -> plt.Figure:
     plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel(r'$\sigma_{B/R}$')
+    plt.title("Attitude Error", fontsize="22")
 
     return fig
 
@@ -104,6 +109,7 @@ def plotAttitudeErrorRate(timeAxis: np.ndarray, omega_BR_B: np.ndarray) -> plt.F
     plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel(r'$\omega_{B/R}$')
+    plt.title("Attitude Error Rate", fontsize="22")
 
     return fig
 
@@ -135,11 +141,11 @@ def panelChainGen(scGeometry: geometryClass, baseIndent: int):
         pad = "\t" * (baseIndent + 2 * idx)
 
         if idx == 0:
-            bendingPos = f"{scGeometry.lengthHub / 2} 0 {scGeometry.heightHub / 2 - scGeometry.thicknessSubPanel / 2}"
+            bendingPos = f"0 {scGeometry.lengthHub / 2} {scGeometry.heightHub / 2 - scGeometry.thicknessSubPanel / 2}"
         else:
-            bendingPos = f"{scGeometry.lengthSubPanel} 0 0"
+            bendingPos = f"0 {scGeometry.lengthSubPanel} 0"
 
-        COM_offset = f"{scGeometry.lengthSubPanel / 2} 0 0"
+        COM_offset = f"0 {scGeometry.lengthSubPanel / 2} 0"
 
         ixx = round(scGeometry.massSubPanel / 12 * (scGeometry.lengthSubPanel**2 + scGeometry.thicknessSubPanel**2), 6)
         iyy = round(scGeometry.massSubPanel / 12 * (scGeometry.widthSubPanel**2 + scGeometry.thicknessSubPanel**2), 6)
@@ -147,8 +153,8 @@ def panelChainGen(scGeometry: geometryClass, baseIndent: int):
 
         openTags.append(
 f"""{pad}<body name = "subPanel{n}" pos = "{bendingPos}">
-{pad}   <joint name = "bendJoint{n}" pos = "0 0 0" axis = "0 1 0" ref = "0"/>
-{pad}   <joint name = "twistJoint{n}" pos = "0 0 0" axis = "1 0 0" ref = "0"/>
+{pad}   <joint name = "bendJoint{n}" pos = "0 0 0" axis = "1 0 0" ref = "0"/>
+{pad}   <joint name = "twistJoint{n}" pos = "0 0 0" axis = "0 1 0" ref = "0"/>
 {pad}   <inertial pos = "{COM_offset}" mass = "{scGeometry.massSubPanel}" diaginertia = "{ixx} {iyy} {izz}"/>
 {pad}   <geom name = "subPanel{n}Geom" class = "subpanel_geom" pos = "{COM_offset}"/>""")
         
@@ -169,7 +175,7 @@ def makeMjXmlString(scGeometry: geometryClass, hubMass: float = 1000.0):
     <compiler angle = "radian" meshdir = ""/>
     <default>
         <default class = "subpanel_geom">
-            <geom type = "box" size = "{scGeometry.lengthSubPanel / 2} {scGeometry.widthSubPanel / 2} {scGeometry.thicknessSubPanel / 2}"
+            <geom type = "box" size = "{scGeometry.widthSubPanel / 2} {scGeometry.lengthSubPanel / 2} {scGeometry.thicknessSubPanel / 2}"
             contype = "0" conaffinity = "1"/>
         </default>
     </default>
@@ -178,7 +184,7 @@ def makeMjXmlString(scGeometry: geometryClass, hubMass: float = 1000.0):
         <body name = "hub" pos = "0 0 0">
             <freejoint name = "busFree"/>
             <inertial pos = "0 0 0" mass = "{hubMass}" diaginertia = "{ixx} {iyy} {izz}"/>
-            <geom name = "hubVisual" type = "box" size = "{scGeometry.lengthHub / 2} {scGeometry.widthHub / 2} {scGeometry.heightHub / 2}" rgba = "1 1 1 1"/>
+            <geom name = "hubVisual" type = "box" size = "{scGeometry.widthHub / 2} {scGeometry.lengthHub / 2} {scGeometry.heightHub / 2}" rgba = "1 1 1 1"/>
             <site name = "hubSite" pos = "0 0 0"/>
 {panelChain}
         </body>
@@ -287,13 +293,13 @@ def run(showPlots: bool = False):
     attError.attRefInMsg.subscribeTo(inertial3DObj.attRefOutMsg)
     sim.AddModelToTask(fswTaskName, attError)
 
-    IHubPntBc_B = np.array([[scGeometry.massHub / 12 * (scGeometry.widthHub**2 + scGeometry.heightHub**2), 0.0, 0.0],
-                            [0.0, scGeometry.massHub / 12 * (scGeometry.lengthHub**2 + scGeometry.heightHub**2), 0.0],
+    IHubPntBc_B = np.array([[scGeometry.massHub / 12 * (scGeometry.lengthHub**2 + scGeometry.heightHub**2), 0.0, 0.0],
+                            [0.0, scGeometry.massHub / 12 * (scGeometry.widthHub**2 + scGeometry.heightHub**2), 0.0],
                             [0.0, 0.0, scGeometry.massHub / 12 * (scGeometry.lengthHub**2 + scGeometry.widthHub**2)]])
-    IPanelPntSc_B = np.array([[scGeometry.massPanel / 12 * (scGeometry.widthPanel**2 + scGeometry.thicknessPanel**2), 0.0, 0.0,],
-                              [0.0, scGeometry.massPanel / 12 * (scGeometry.lengthPanel**2 + scGeometry.thicknessPanel**2), 0.0],
+    IPanelPntSc_B = np.array([[scGeometry.massPanel / 12 * (scGeometry.lengthPanel**2 + scGeometry.thicknessPanel**2), 0.0, 0.0,],
+                              [0.0, scGeometry.massPanel / 12 * (scGeometry.widthPanel**2 + scGeometry.thicknessPanel**2), 0.0],
                               [0.0, 0.0, scGeometry.massPanel / 12 * (scGeometry.widthPanel**2 + scGeometry.lengthPanel**2)]])
-    r_ScB_B = [scGeometry.lengthHub/2 + scGeometry.lengthPanel/2, 0.0,
+    r_ScB_B = [0.0, scGeometry.lengthHub/2 + scGeometry.lengthPanel/2,
            scGeometry.heightHub/2 - scGeometry.thicknessSubPanel/2]
     IHubPntB_B =  IHubPntBc_B + IPanelPntSc_B - scGeometry.massPanel * np.array(rbk.v3Tilde(r_ScB_B)) @ np.array(rbk.v3Tilde(r_ScB_B))
     
@@ -427,8 +433,8 @@ if __name__ == "__main__":
     numSegments = 5
     scGeometry = geometryClass(numSegments)
     xmlString = makeMjXmlString(scGeometry, hubMass = 1000.0)
- 
-    with open("spacecraft.xml", "w") as f:
+
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sat_flexiblePanel.xml"), "w") as f:
         f.write(xmlString)
 
     run(showPlots = True)

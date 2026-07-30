@@ -51,6 +51,12 @@ conan.lock
 /logs/
 /data/raw/
 
+# --- Experimental / hardware data (electroadhesion testing) ---
+experimental/data/
+experimental/**/*.csv
+experimental/**/*.log
+*.cal
+
 # --- Vizard save files ---
 *_VizFiles/
 *.viz

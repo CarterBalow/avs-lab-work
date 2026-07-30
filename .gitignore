@@ -41,6 +41,7 @@ conan.lock
 
 # --- Simulation outputs / data (usually large / regenerable) ---
 *.png
+*.xml
 *.svg
 *.mp4
 *.bin

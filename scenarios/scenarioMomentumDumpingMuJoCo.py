@@ -214,9 +214,37 @@ def makeMjXmlString():
     </worldbody>
 </mujoco>"""
 
-#def run(showPlots: bool = False):
+def run(showPlots: bool = False):
+    # -------------------------------------------------------------------------
+    # 1) Simulation configuration and MJScene dynamics model
+    # -------------------------------------------------------------------------
+    fswTaskName = "fswTask"
+    dynTaskName = "dynTask"
+    simProcessName = "simProcess"
 
-    
+    simulationTime = macros.min2nano(5)
+    simulationTimeStepFsw = macros.sec2nano(1)
+    simulationTimeStepDyn = macros.sec2nano(0.1)
+
+    sim = SimulationBaseClass.SimBaseClass()
+
+    dynProcess = sim.CreateNewProcess(simProcessName)
+    dynProcess.addTask(sim.CreateNewTask(dynTaskName, simulationTimeStepDyn))
+    dynProcess.addTask(sim.CreateNewTask(fswTaskName, simulationTimeStepFsw))
+
+    xmlString = makeMjXmlString()
+    scene = mujoco.MJScene(xmlString)
+    scene.ModelTag = "mujocoScene"
+    sim.AddModelToTask(dynTaskName, scene)
+
+    # -------------------------------------------------------------------------
+    # 2) Retrieve spacecraft componenets
+    # -------------------------------------------------------------------------
+    busBody = scene.getBody("hub")
+
+    RWs = [scene.getBody(f"rw{i + 1}Spin") for i in range(numberOfSegments)]
+    bendJoints = [subPanels[i].getScalarJoint(f"bendJoint{i + 1}") for i in range(numberOfSegments)]
+    twistJoints = [subPanels[i].getScalarJoint(f"twistJoint{i + 1}") for i in range(numberOfSegments)]      
 
 
 if __name__ == "__main__":

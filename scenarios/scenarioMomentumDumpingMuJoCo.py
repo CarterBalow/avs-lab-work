@@ -2,7 +2,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, RigidBodyKinematics as rbk, simHelpers
+from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, RigidBodyKinematics as rbk, simHelpers, simIncludeRW
 from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel, simpleNav
 from Basilisk.fswAlgorithms import mrpFeedback, inertial3D, attTrackingError
 from Basilisk.architecture import messaging, sysModel
@@ -136,10 +136,8 @@ def quatAlignment(axis: list):
 
 
 def addRWsXML(rwPos: list, 
-              rwAxes: list, 
-              rwMaxMomentums: list, 
-              rwMaxOmegas: list, 
-              rwRad: float = 0.15, 
+              rwAxes: list,
+              rwFactory: simIncludeRW, 
               baseIndent: int = 2):
 
     numRW = len(rwPos)
@@ -148,19 +146,15 @@ def addRWsXML(rwPos: list,
     rwTags = []
     for idx in range(numRW):
         n = idx + 1
+        rw = rwFactory.create('Honeywell_HR16', rwAxes[idx], maxMomentum=100.)
         pos = rwPos[idx]
         quat = quatAlignment(rwAxes[idx])
-        omegaMaxRadS = rwMaxOmegas[idx] * 2 * np.pi / 60
-
-        Js = round(rwMaxMomentums[idx] / omegaMaxRadS, 6)
-        Jt = round(Js / 2, 6) # thin assump.
-        mass = round(2 * Js / rwRad**2, 6)
 
         rwTags.append(
-f"""{pad}<body name = rw{n}Spin pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}">
+f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}">
 {pad}   <joint name = "rw{n}Joint" pos = "0 0 0" axis = "0 0 1" ref = "0"/>
-{pad}   <iinertial pos = "0 0 0" mass = "{mass}" diaginertia = "{Jt} {Jt} {Js}"/>
-{pad}   <geom name = "rw{n}Geom" type = "cylinder" size = "{rwRad} 0.02" contype = "0" conaffinity = "0" rgba = "0.3 0.3 0.3 1"/>
+{pad}   <inertial pos = "0 0 0" mass = "{rw.mass}" diaginertia = "{rw.Jt} {rw.Jt} {rw.Js}"/>
+{pad}   <geom name = "rw{n}Geom" type = "cylinder" contype = "0" conaffinity = "0"/>
 {pad}</body>""")
 
     return "\n".join(rwTags)
@@ -188,9 +182,7 @@ def makeMjXmlString():
     c = 2**-0.5
     rwPos = [[0.0, 0.0, 0.0]] * 4
     rwAxes = [[c, 0, c], [0, c, c], [-c, 0, c], [0, -c, c]]
-    rwMaxes = [100.0, 100.0, 100.0, 100.0]
-    rwOmegas = [4000.0, 2000.0, 3500.0, 0.0]  # RPM, unused in the MJCF itself
- 
+
     a, b = 1.0, 1.28
     thrustLocs = [
         [-a, -a,  b], [ a, -a, -b], [ a, -a,  b], [ a,  a, -b],
@@ -201,11 +193,11 @@ def makeMjXmlString():
         [-1,  0,  0], [ 1,  0,  0], [ 0, -1,  0], [ 0,  1,  0],
     ])
  
-    rwChain = addRWsXML(rwPos, rwAxes, rwMaxes, rwOmegas, baseIndent = 3)
+    rwFactory = simIncludeRW.rwFactory()
+    rwChain = addRWsXML(rwPos, rwAxes, rwFactory)
     thrusterSites = addThrustersXML(thrustLocs, thrustDirs, baseIndent = 3)
  
-    return f"""
-<mujoco model = "busWithRWsAndThrusters">
+    return f"""<mujoco model = "busWithRWsAndThrusters">
     <compiler angle = "radian" meshdir = ""/>
  
     <worldbody>
@@ -213,8 +205,11 @@ def makeMjXmlString():
             <freejoint name = "busFree"/>
             <inertial pos = "0 0 0" mass = "{hubMass}" diaginertia = "{hubIxx} {hubIyy} {hubIzz}"/>
             <geom name = "hubVisual" type = "box" size = "1 1 1.28" rgba = "1 1 1 1"/>
+
 {thrusterSites}
+
 {rwChain}
+
         </body>
     </worldbody>
 </mujoco>"""
@@ -225,10 +220,11 @@ def makeMjXmlString():
 
 
 if __name__ == "__main__":
-    #run(True)
     # --- XML TESTING ---
     
     xmlString = makeMjXmlString()
  
-    with open("spacecraft2.xml", "w") as f:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sat_momentumDump.xml"), "w") as f:
         f.write(xmlString)
+
+    #run(True)

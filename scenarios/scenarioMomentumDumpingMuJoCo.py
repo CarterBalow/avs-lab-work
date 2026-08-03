@@ -4,7 +4,7 @@ import numpy as np
 
 from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, RigidBodyKinematics as rbk, simHelpers, simIncludeRW, simIncludeThruster
 from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel, simpleNav
-from Basilisk.fswAlgorithms import mrpFeedback, inertial3D, attTrackingError
+from Basilisk.fswAlgorithms import mrpFeedback, inertial3D, attTrackingError, rwMotorTorque, thrMomentumManagement, thrForceMapping, thrMomentumDumping
 from Basilisk.architecture import messaging, sysModel
 
 from Basilisk import __path__
@@ -143,10 +143,12 @@ def addRWsXML(rwPos: list,
     numRW = len(rwPos)
     pad = "\t" * baseIndent
 
-    rwTags = []
+    rwTags, actTags, RWs = []
+
     for idx in range(numRW):
         n = idx + 1
         rw = rwFactory.create('Honeywell_HR16', rwAxes[idx], maxMomentum=100.)
+        RWs.append(rw)
         pos = rwPos[idx]
         quat = quatAlignment(rwAxes[idx])
 
@@ -157,7 +159,9 @@ f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{qu
 {pad}   <geom name = "rw{n}Geom" type = "cylinder" contype = "0" conaffinity = "0"/>
 {pad}</body>""")
 
-    return "\n".join(rwTags)
+        actTags.append(f'\t\t<motor name="rw{n}Joint" joint="rw{n}Joint"/>')
+
+    return "\n".join(rwTags), "\n".join(actTags), RWs
 
 
 def addThrustersXML(thrustLocs: list, 
@@ -174,7 +178,7 @@ def addThrustersXML(thrustLocs: list,
         thrustTags.append(f'{pad}<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}"/>')
         actTags.append(f'{pad}<name = "thruster{n}" site = "thrusterSite{n}" gear = "0 0 1 0 0 0" ctrlrange="0 5"/>')
     
-    return "\n".join(thrustTags)
+    return "\n".join(thrustTags), "\n".join(actTags)
 
 
 def makeMjXmlString():
@@ -196,10 +200,10 @@ def makeMjXmlString():
     ])
  
     rwFactory = simIncludeRW.rwFactory()
-    rwChain = addRWsXML(rwPos, rwAxes, rwFactory)
-    thrusterSites = addThrustersXML(thrustLocs, thrustDirs, baseIndent = 3)
+    rwBodies, rwActs, RWs = addRWsXML(rwPos, rwAxes, rwFactory)
+    thrSites, thrActs = addThrustersXML(thrustLocs, thrustDirs, baseIndent = 3)
  
-    return f"""<mujoco model = "busWithRWsAndThrusters">
+    xml = f"""<mujoco model = "busWithRWsAndThrusters">
     <compiler angle = "radian" meshdir = ""/>
  
     <worldbody>
@@ -208,13 +212,22 @@ def makeMjXmlString():
             <inertial pos = "0 0 0" mass = "{hubMass}" diaginertia = "{hubIxx} {hubIyy} {hubIzz}"/>
             <geom name = "hubVisual" type = "box" size = "1 1 1.28" rgba = "1 1 1 1"/>
 
-{thrusterSites}
+{thrSites}
 
-{rwChain}
+{rwBodies}
 
         </body>
     </worldbody>
+
+{rwActs}
+
+{thrActs}
+
 </mujoco>"""
+
+    return xml, RWs, thrSites, rwFactory
+
+
 
 def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
@@ -234,7 +247,7 @@ def run(showPlots: bool = False):
     dynProcess.addTask(sim.CreateNewTask(dynTaskName, simulationTimeStepDyn))
     dynProcess.addTask(sim.CreateNewTask(fswTaskName, simulationTimeStepFsw))
 
-    xmlString = makeMjXmlString()
+    xmlString, RWs, THRs, rwFactory = makeMjXmlString()
     scene = mujoco.MJScene(xmlString)
     scene.ModelTag = "mujocoScene"
     sim.AddModelToTask(dynTaskName, scene)
@@ -243,14 +256,125 @@ def run(showPlots: bool = False):
     # 2) Retrieve spacecraft componenets
     # -------------------------------------------------------------------------
     busBody = scene.getBody("hub")
+    numRWs = len(RWs)
+    numTHRs = len(THRs)
 
-    numRWs = 4
-    RWs = [scene.getBody(f"rw{i + 1}Spin") for i in range(numRWs)]
-    RWJoints = [RWs[i].getScalarJoint(f"rw{i + 1}Joint") for i in range(numRWs)]
+    RWJoints = [busBody.getScalarJoint(f"rw{i + 1}Joint") for i in range(numRWs)]
+    RWActuators = [scene.getSingleActuator(f"rw{i + 1}Joint") for i in range(numRWs)]
+    THRActuators = [scene.getSingleActuator(f"thrusterSite{i + 1}") for i in range(numTHRs)]
 
-    numThrusters = 8
-    thrusters = [scene.getSite(f"thrusterSite{i + 1}") for i in range(numThrusters)]
+    # -------------------------------------------------------------------------
+    # 3) Add gravity
+    # -------------------------------------------------------------------------
+    gravity = NBodyGravity.NBodyGravity()
+    gravity.ModelTag = "gravity"
+    scene.AddModelToDynamicsTask(gravity)
 
+    muEarth = 0.3986004415e15  # [m^3/s^2]
+    earthPm = pointMassGravityModel.PointMassGravityModel()
+    earthPm.muBody = muEarth
+    gravity.addGravitySource("earth", earthPm, isCentralBody = True)
+
+    gravity.addGravityTarget("hub", busBody)
+
+    # -------------------------------------------------------------------------
+    # 4) Initial conditions
+    # -------------------------------------------------------------------------
+    oe = orbitalMotion.ClassicElements()
+    rLEO = 7000. * 1000  # meters
+    oe.a = rLEO
+    oe.e = 0.0001
+    oe.i = 0.0 * macros.D2R
+    oe.Omega = 48.2 * macros.D2R
+    oe.omega = 347.8 * macros.D2R
+    oe.f = 85.3 * macros.D2R
+    rN, vN = orbitalMotion.elem2rv(muEarth, oe)
+
+    # -------------------------------------------------------------------------
+    # 5) Navitation and FSW
+    # -------------------------------------------------------------------------
+    simpleNavObj = simpleNav.SimpleNav()
+    simpleNavObj.ModelTag = "simpleNav"
+    simpleNavObj.scStateInMsg.subscribeTo(busBody.getCenterOfMass().stateOutMsg)
+    sim.AddModelToTask(dynTaskName, simpleNavObj)
+
+    inertial3DObj = inertial3D.inertial3D()
+    inertial3DObj.ModelTag = "inertial3D"
+    inertial3DObj.sigma_R0N = [0.0, 0.0, 0.0]
+    sim.AddModelToTask(fswTaskName, inertial3DObj)
+
+    attError = attTrackingError.attTrackingError()
+    attError.ModelTag = "attErrorInertial3D"
+    sim.AddModelToTask(fswTaskName, attError)
+
+    mrpControl = mrpFeedback.mrpFeedback()
+    mrpControl.ModelTag = "mrpFeedback"
+    sim.AddModelToTask(fswTaskName, mrpControl)
+    decayTime = 10.0
+    xi = 1.0
+    I = np.diag([1700, 1700, 1800])
+    mrpControl.Ki = -1  # make value negative to turn off integral feedback
+    mrpControl.P = 3*np.max(I)/decayTime
+    mrpControl.K = (mrpControl.P/xi)*(mrpControl.P/xi)/np.max(I)
+    mrpControl.integralLimit = 2. / mrpControl.Ki * 0.1
+
+    controlAxes_B = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+    # add module that maps the Lr control torque into the RW motor torques
+    rwMotorTorqueObj = rwMotorTorque.rwMotorTorque()
+    rwMotorTorqueObj.ModelTag = "rwMotorTorque"
+    sim.AddModelToTask(fswTaskName, rwMotorTorqueObj)
+    # Make the RW control all three body axes
+    rwMotorTorqueObj.controlAxes_B = controlAxes_B
+
+    # Momentum dumping configuration
+    thrDesatControl = thrMomentumManagement.thrMomentumManagement()
+    thrDesatControl.ModelTag = "thrMomentumManagement"
+    sim.AddModelToTask(fswTaskName, thrDesatControl)
+    thrDesatControl.hs_min = 80   # Nms  :  maximum wheel momentum
+
+    # setup the thruster force mapping module
+    thrForceMappingObj = thrForceMapping.thrForceMapping()
+    thrForceMappingObj.ModelTag = "thrForceMapping"
+    sim.AddModelToTask(fswTaskName, thrForceMappingObj)
+    thrForceMappingObj.controlAxes_B = controlAxes_B
+    thrForceMappingObj.thrForceSign = 1
+    thrForceMappingObj.angErrThresh = 3.15    # this needs to be larger than pi (180 deg) for the module to work in the momentum dumping scenario
+
+    # setup the thruster momentum dumping module
+    thrDump = thrMomentumDumping.thrMomentumDumping()
+    thrDump.ModelTag = "thrDump"
+    sim.AddModelToTask(fswTaskName, thrDump)
+    thrDump.maxCounterValue = 100          # number of control periods (simulationTimeStepFsw) to wait between two subsequent on-times
+    thrDump.thrMinFireTime = 0.02       
+
+    fswRwParamMsg = rwFactory.getConfigMessage()   
+
+    # -------------------------------------------------------------------------
+    # 6) Distribute torques
+    # -------------------------------------------------------------------------
+    distributor = RWTorqueDistributor(numRWs)
+    distributor.rwMotorTorqueInMsg.subscribeTo(rwMotorTorqueObj.rwMotorTorqueOutMsg)
+    sim.AddModelToTask(fswTaskName, distributor)
+    for i in range(numRWs):
+        RWActuators[i].actuatorInMsg.subscribeTo(distributor.torqueOutMsgs[i])
+
+
+class RWTorqueDistributor(sysModel.SysModel):
+    def __init__(self, numRW):
+        super().__init__()
+        self.ModelTag = "rwTorqueDistributor"
+        self.numRW = numRW
+        self.rwMotorTorqueInMsg = messaging.ArrayMotorTorqueMsgReader()
+        self.torqueOutMsgs = [messaging.SingleActuatorMsg() for _ in range(numRW)]
+
+    def UpdateState(self, CurrentSimNanos):
+        if self.rwMotorTorqueInMsg.isLinked():
+            payload = self.rwMotorTorqueInMsg()
+            for i in range(self.numRW):
+                out = messaging.SingleActuatorMsgPayload()
+                out.input = payload.motorTorque[i]
+                self.torqueOutMsgs[i].write(out, CurrentSimNanos, self.moduleID)
 
 
 

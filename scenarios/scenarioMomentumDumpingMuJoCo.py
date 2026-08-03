@@ -2,7 +2,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, RigidBodyKinematics as rbk, simHelpers, simIncludeRW, simIncludeThruster
+from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, RigidBodyKinematics as rbk, simHelpers, simIncludeRW, simIncludeThruster, unitTestSupport
 from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel, simpleNav
 from Basilisk.fswAlgorithms import mrpFeedback, inertial3D, attTrackingError, rwMotorTorque, thrMomentumManagement, thrForceMapping, thrMomentumDumping
 from Basilisk.architecture import messaging, sysModel
@@ -143,7 +143,7 @@ def addRWsXML(rwPos: list,
     numRW = len(rwPos)
     pad = "\t" * baseIndent
 
-    rwTags, actTags, RWs = []
+    rwTags, actTags, RWs = [], [], []
 
     for idx in range(numRW):
         n = idx + 1
@@ -159,7 +159,7 @@ f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{qu
 {pad}   <geom name = "rw{n}Geom" type = "cylinder" contype = "0" conaffinity = "0"/>
 {pad}</body>""")
 
-        actTags.append(f'\t\t<motor name="rw{n}Joint" joint="rw{n}Joint"/>')
+        actTags.append(f'{pad}<motor name = "rw{n}Act" joint = "rw{n}Joint"/>')
 
     return "\n".join(rwTags), "\n".join(actTags), RWs
 
@@ -175,8 +175,8 @@ def addThrustersXML(thrustLocs: list,
         n = idx + 1
         pos = thrustLocs[idx]
         quat = quatAlignment(thrustDirs[idx])
-        thrustTags.append(f'{pad}<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}"/>')
-        actTags.append(f'{pad}<name = "thruster{n}" site = "thrusterSite{n}" gear = "0 0 1 0 0 0" ctrlrange="0 5"/>')
+        thrustTags.append(f'{pad}\t<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}"/>')
+        actTags.append(f'{pad}<motor name = "thruster{n}" site = "thrusterSite{n}" gear = "0 0 1 0 0 0" ctrlrange = "0 5"/>')
     
     return "\n".join(thrustTags), "\n".join(actTags)
 
@@ -201,7 +201,7 @@ def makeMjXmlString():
  
     rwFactory = simIncludeRW.rwFactory()
     rwBodies, rwActs, RWs = addRWsXML(rwPos, rwAxes, rwFactory)
-    thrSites, thrActs = addThrustersXML(thrustLocs, thrustDirs, baseIndent = 3)
+    thrSites, thrActs = addThrustersXML(thrustLocs, thrustDirs)
  
     xml = f"""<mujoco model = "busWithRWsAndThrusters">
     <compiler angle = "radian" meshdir = ""/>
@@ -219,9 +219,11 @@ def makeMjXmlString():
         </body>
     </worldbody>
 
+    <actuator>
 {rwActs}
 
 {thrActs}
+    </actuator>
 
 </mujoco>"""
 
@@ -260,7 +262,7 @@ def run(showPlots: bool = False):
     numTHRs = len(THRs)
 
     RWJoints = [busBody.getScalarJoint(f"rw{i + 1}Joint") for i in range(numRWs)]
-    RWActuators = [scene.getSingleActuator(f"rw{i + 1}Joint") for i in range(numRWs)]
+    RWActuators = [scene.getSingleActuator(f"rw{i + 1}Act") for i in range(numRWs)]
     THRActuators = [scene.getSingleActuator(f"thrusterSite{i + 1}") for i in range(numTHRs)]
 
     # -------------------------------------------------------------------------
@@ -305,6 +307,8 @@ def run(showPlots: bool = False):
 
     attError = attTrackingError.attTrackingError()
     attError.ModelTag = "attErrorInertial3D"
+    attError.attNavInMsg.subscribeTo(simpleNavObj.attOutMsg)
+    attError.attRefInMsg.subscribeTo(inertial3DObj.attRefOutMsg)
     sim.AddModelToTask(fswTaskName, attError)
 
     mrpControl = mrpFeedback.mrpFeedback()
@@ -359,6 +363,109 @@ def run(showPlots: bool = False):
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(distributor.torqueOutMsgs[i])
 
+    # -------------------------------------------------------------------------
+    # 6) Message Linking
+    # -------------------------------------------------------------------------
+    mrpControl.guidInMsg.subscribeTo(attError.attGuidOutMsg)
+    mrpControl.rwParamsInMsg.subscribeTo(fswRwParamMsg)
+
+    rwMotorTorqueObj.rwParamsInMsg.subscribeTo(fswRwParamMsg)
+    rwMotorTorqueObj.vehControlInMsg.subscribeTo(mrpControl.cmdTorqueOutMsg)
+    thrDesatControl.rwConfigDataInMsg.subscribeTo(fswRwParamMsg)
+    thrForceMappingObj.cmdTorqueInMsg.subscribeTo(thrDesatControl.deltaHOutMsg)
+    thrDump.deltaHInMsg.subscribeTo(thrDesatControl.deltaHOutMsg)
+    thrDump.thrusterImpulseInMsg.subscribeTo(thrForceMappingObj.thrForceCmdOutMsg)
+
+    # -------------------------------------------------------------------------
+    # 7) Set up data recording
+    # -------------------------------------------------------------------------
+    numDataPoints = 5000
+    samplingTime = unitTestSupport.samplingTime(simulationTime, simulationTimeStepDyn, numDataPoints)
+
+    sNavRec = simpleNavObj.attOutMsg.recorder(samplingTime)
+    sim.AddModelToTask(dynTaskName, sNavRec)
+
+    dataRec = busBody.getCenterOfMass().stateOutMsg.recorder(samplingTime)
+    sim.AddModelToTask(dynTaskName, dataRec)
+
+    rwMotorLog = rwMotorTorqueObj.rwMotorTorqueOutMsg.recorder(samplingTime)
+    sim.AddModelToTask(dynTaskName, rwMotorLog)
+
+    attErrorLog = attError.attGuidOutMsg.recorder(samplingTime)
+    sim.AddModelToTask(dynTaskName, attErrorLog)
+
+    deltaHLog  = thrDesatControl.deltaHOutMsg.recorder(samplingTime)
+    sim.AddModelToTask(dynTaskName, deltaHLog)
+
+    thrMapLog = thrForceMappingObj.thrForceCmdOutMsg.recorder(samplingTime)
+    sim.AddModelToTask(dynTaskName, thrMapLog)
+
+    onTimeLog = thrDump.thrusterOnTimeOutMsg.recorder(samplingTime)
+    sim.AddModelToTask(dynTaskName, onTimeLog)
+
+    mrpLog = busBody.getOrigin().stateOutMsg.recorder(samplingTime)
+    sim.AddModelToTask(dynTaskName, mrpLog)
+
+    rwSpeedLogs = []
+    for i in range(numRWs):
+        rwSpeedLogs.append(RWJoints[i].stateDotOutMsg.recorder(samplingTime))
+        sim.AddModelToTask(dynTaskName, rwSpeedLogs[i])
+
+    thrForceLogs = []
+    for i in range(numTHRs):
+        thrForceLogs.append(THRActuators[i].actuatorInMsg.recorder(samplingTime))
+        sim.AddModelToTask(dynTaskName, thrForceLogs[i])
+
+    # -------------------------------------------------------------------------
+    # 8) Running simulation
+    # -------------------------------------------------------------------------
+    sim.InitializeSimulation()
+
+    sim.ConfigureStopTime(macros.sec2nano(10.0))
+    sim.ExecuteSimulation()
+
+    thrDesatControl.Reset(macros.sec2nano(10.0))
+
+    sim.ConfigureStopTime(simulationTime)
+    sim.ExecuteSimulation()
+
+    # -------------------------------------------------------------------------
+    # 9) Post processing and plotting
+    # -------------------------------------------------------------------------
+    dataSigmaBR = attErrorLog.sigma_BR
+    dataOmegaBR = attErrorLog.omega_BR_B
+    dataOmegaRW = mrpLog.wheelSpeeds
+    dataDH = deltaHLog.torqueRequestBody
+    dataMap = thrMapLog.thrForce
+    dataOnTime = onTimeLog.OnTimeRequest
+
+    dataRW = []
+    for i in range(numRWs):
+        dataRW.append(rwSpeedLogs[i].u_current)
+
+    dataThr = []
+    for i in range(numTHRs):
+        dataThr.append(thrForceLogs[i].thrustForce)
+
+    np.set_printoptions(precision=16)
+
+    timeData = rwMotorLog.times() * macros.NANO2SEC
+
+    plt.close("all")
+    figureList = {}
+    figureList[fileName + "_attError"] = plot_attitude_error(timeData, dataSigmaBR)
+    figureList[fileName + "_rateError"] = plot_rate_error(timeData, dataOmegaBR)
+    figureList[fileName + "_rwMomenta"] = plot_rw_momenta(timeData, dataOmegaRW, RWs, numRWs)
+    figureList[fileName + "_DH"] = plot_DH(timeData, dataDH)
+    figureList[fileName + "_thrImpulse"] = plot_thrImpulse(timeData, dataMap, numTHRs)
+    figureList[fileName + "_OnTimeReq"] = plot_OnTimeRequest(timeData, dataOnTime, numTHRs)
+    figureList[fileName + "_thrForce"] = plot_thrForce(timeData, dataThr, numTHRs)
+
+    if showPlots:
+        plt.show()
+
+    return figureList
+
 
 class RWTorqueDistributor(sysModel.SysModel):
     def __init__(self, numRW):
@@ -381,9 +488,9 @@ class RWTorqueDistributor(sysModel.SysModel):
 if __name__ == "__main__":
     # --- XML TESTING ---
     
-    xmlString = makeMjXmlString()
+    xmlString, _, _, _ = makeMjXmlString()
  
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sat_momentumDump.xml"), "w") as f:
         f.write(xmlString)
 
-    #run(True)
+    run(True)

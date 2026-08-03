@@ -2,7 +2,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, RigidBodyKinematics as rbk, simHelpers, simIncludeRW
+from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, RigidBodyKinematics as rbk, simHelpers, simIncludeRW, simIncludeThruster
 from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel, simpleNav
 from Basilisk.fswAlgorithms import mrpFeedback, inertial3D, attTrackingError
 from Basilisk.architecture import messaging, sysModel
@@ -166,11 +166,13 @@ def addThrustersXML(thrustLocs: list,
     
     pad = "\t" * baseIndent
     thrustTags = []
+    actTags = []
     for idx in range(len(thrustLocs)):
         n = idx + 1
         pos = thrustLocs[idx]
         quat = quatAlignment(thrustDirs[idx])
         thrustTags.append(f'{pad}<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}"/>')
+        actTags.append(f'{pad}<name = "thruster{n}" site = "thrusterSite{n}" gear = "0 0 1 0 0 0" ctrlrange="0 5"/>')
     
     return "\n".join(thrustTags)
 
@@ -242,9 +244,14 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     busBody = scene.getBody("hub")
 
-    RWs = [scene.getBody(f"rw{i + 1}Spin") for i in range(numberOfSegments)]
-    bendJoints = [subPanels[i].getScalarJoint(f"bendJoint{i + 1}") for i in range(numberOfSegments)]
-    twistJoints = [subPanels[i].getScalarJoint(f"twistJoint{i + 1}") for i in range(numberOfSegments)]      
+    numRWs = 4
+    RWs = [scene.getBody(f"rw{i + 1}Spin") for i in range(numRWs)]
+    RWJoints = [RWs[i].getScalarJoint(f"rw{i + 1}Joint") for i in range(numRWs)]
+
+    numThrusters = 8
+    thrusters = [scene.getSite(f"thrusterSite{i + 1}") for i in range(numThrusters)]
+
+
 
 
 if __name__ == "__main__":

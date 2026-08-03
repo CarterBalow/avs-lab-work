@@ -14,7 +14,9 @@ fileName = os.path.basename(os.path.splitext(__file__)[0])
 
 def plot_attitude_error(timeData, dataSigmaBR):
     """Plot the attitude errors."""
-    plt.figure(1)
+    fig = plt.figure(num = 1, clear = True)
+    ax = fig.gca()
+    ax.ticklabel_format(useOffset = False, style = 'plain')
     for idx in range(3):
         plt.plot(timeData, dataSigmaBR[:, idx],
                  color = simHelpers.getLineColor(idx, 3),
@@ -23,10 +25,14 @@ def plot_attitude_error(timeData, dataSigmaBR):
     plt.xlabel('Time [min]')
     plt.ylabel(r'Attitude Error $\sigma_{B/R}$')
 
+    return fig
+
 
 def plot_rate_error(timeData, dataOmegaBR):
     """Plot the body angular velocity rate tracking errors."""
-    plt.figure(2)
+    fig = plt.figure(num = 2, clear = True)
+    ax = fig.gca()
+    ax.ticklabel_format(useOffset = False, style = 'plain')
     for idx in range(3):
         plt.plot(timeData, dataOmegaBR[:, idx],
                  color = simHelpers.getLineColor(idx, 3),
@@ -34,6 +40,8 @@ def plot_rate_error(timeData, dataOmegaBR):
     plt.legend(loc='lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('Rate Tracking Error (rad/s) ')
+
+    return fig
 
 
 def plot_rw_momenta(timeData, dataOmegaRw, RW, numRW):
@@ -45,7 +53,10 @@ def plot_rw_momenta(timeData, dataOmegaRw, RW, numRW):
             for k in range(3):
                 totMomentum[k] = totMomentum[k] + dataOmegaRw[j, idx] * RW[idx].Js * RW[idx].gsHat_B[k][0]
         totMomentumNorm.append(np.linalg.norm(totMomentum))
-    plt.figure(3)
+
+    fig = plt.figure(num = 3, clear = True)
+    ax = fig.gca()
+    ax.ticklabel_format(useOffset = False, style = 'plain')
     for idx in range(numRW):
         plt.plot(timeData, dataOmegaRw[:, idx] * RW[idx].Js,
                  color = simHelpers.getLineColor(idx, numRW),
@@ -56,10 +67,14 @@ def plot_rw_momenta(timeData, dataOmegaRw, RW, numRW):
     plt.xlabel('Time [min]')
     plt.ylabel('RW Momentum (Nms)')
 
+    return fig
+
 
 def plot_DH(timeData, dataDH):
     """Plot the body angular velocity rate tracking errors."""
-    plt.figure(4)
+    fig = plt.figure(num = 4, clear = True)
+    ax = fig.gca()
+    ax.ticklabel_format(useOffset = False, style = 'plain')
     for idx in range(3):
         plt.plot(timeData, dataDH[:, idx],
                  color = simHelpers.getLineColor(idx, 3),
@@ -68,9 +83,14 @@ def plot_DH(timeData, dataDH):
     plt.xlabel('Time [min]')
     plt.ylabel('Dumped momentum (Nms) ')
 
+    return fig
+
 
 def plot_rw_speeds(timeData, dataOmegaRW, numRW):
     """Plot the RW spin rates."""
+    fig = plt.figure(num = 5, clear = True)
+    ax = fig.gca()
+    ax.ticklabel_format(useOffset = False, style = 'plain')
     plt.figure(5)
     for idx in range(numRW):
         plt.plot(timeData, dataOmegaRW[:, idx] / macros.RPM,
@@ -80,10 +100,14 @@ def plot_rw_speeds(timeData, dataOmegaRW, numRW):
     plt.xlabel('Time [min]')
     plt.ylabel('RW Speed (RPM) ')
 
+    return fig
+
 
 def plot_thrImpulse(timeDataFSW, dataMap, numTh):
     """Plot the Thruster force values."""
-    plt.figure(5)
+    fig = plt.figure(num = 6, clear = True)
+    ax = fig.gca()
+    ax.ticklabel_format(useOffset = False, style = 'plain')
     for idx in range(numTh):
         plt.plot(timeDataFSW, dataMap[:, idx],
                  color = simHelpers.getLineColor(idx, numTh),
@@ -92,10 +116,14 @@ def plot_thrImpulse(timeDataFSW, dataMap, numTh):
     plt.xlabel('Time [min]')
     plt.ylabel('Impulse requested [Ns]')
 
+    return fig
+
 
 def plot_OnTimeRequest(timeData, dataOnTime, numTh):
     """Plot the thruster on time requests."""
-    plt.figure(6)
+    fig = plt.figure(num = 7, clear = True)
+    ax = fig.gca()
+    ax.ticklabel_format(useOffset = False, style = 'plain')
     for idx in range(numTh):
         plt.plot(timeData, dataOnTime[:, idx],
                  color = simHelpers.getLineColor(idx, numTh),
@@ -104,10 +132,14 @@ def plot_OnTimeRequest(timeData, dataOnTime, numTh):
     plt.xlabel('Time [min]')
     plt.ylabel('OnTimeRequest [sec]')
 
+    return fig
+
 
 def plot_thrForce(timeDataFSW, dataThr, numTh):
     """Plot the Thruster force values."""
-    plt.figure(7)
+    fig = plt.figure(num = 8, clear = True)
+    ax = fig.gca()
+    ax.ticklabel_format(useOffset = False, style = 'plain')
     for idx in range(numTh):
         plt.plot(timeDataFSW, dataThr[idx],
                  color = simHelpers.getLineColor(idx, numTh),
@@ -115,6 +147,8 @@ def plot_thrForce(timeDataFSW, dataThr, numTh):
     plt.legend(loc='lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('Thruster force [N]')
+
+    return fig
 
 
 def quatAlignment(axis: list):
@@ -138,7 +172,7 @@ def quatAlignment(axis: list):
 def addRWsXML(rwPos: list, 
               rwAxes: list,
               rwFactory: simIncludeRW, 
-              baseIndent: int = 2):
+              baseIndent: int = 3):
 
     numRW = len(rwPos)
     pad = "\t" * baseIndent
@@ -154,31 +188,40 @@ def addRWsXML(rwPos: list,
 
         rwTags.append(
 f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}">
-{pad}   <joint name = "rw{n}Joint" pos = "0 0 0" axis = "0 0 1" ref = "0"/>
-{pad}   <inertial pos = "0 0 0" mass = "{rw.mass}" diaginertia = "{rw.Jt} {rw.Jt} {rw.Js}"/>
-{pad}   <geom name = "rw{n}Geom" type = "cylinder" contype = "0" conaffinity = "0"/>
+{pad}\t<joint name = "rw{n}Joint" pos = "0 0 0" axis = "0 0 1" ref = "0"/>
+{pad}\t<inertial pos = "0 0 0" mass = "{rw.mass}" diaginertia = "{rw.Jt} {rw.Jt} {rw.Js}"/>
+{pad}\t<geom name = "rw{n}Geom" type = "cylinder" size = "0.2 0.05" contype = "0" conaffinity = "0"/>
 {pad}</body>""")
 
-        actTags.append(f'{pad}<motor name = "rw{n}Act" joint = "rw{n}Joint"/>')
+        actTags.append(f'\t\t<motor name = "rw{n}Act" joint = "rw{n}Joint"/>')
 
     return "\n".join(rwTags), "\n".join(actTags), RWs
 
 
 def addThrustersXML(thrustLocs: list, 
                     thrustDirs: list,
+                    thrFactory: simIncludeThruster,
+                    maxThrust: float = 5.0,
                     baseIndent: int = 2):
-    
+
+    numTHRs = len(thrustLocs)
     pad = "\t" * baseIndent
-    thrustTags = []
-    actTags = []
-    for idx in range(len(thrustLocs)):
+
+    thrustTags, actTags, THRs = [], [], []
+
+    for idx in range(numTHRs):
         n = idx + 1
         pos = thrustLocs[idx]
-        quat = quatAlignment(thrustDirs[idx])
+        dirVec = thrustDirs[idx]
+
+        thr = thrFactory.create('MOOG_Monarc_5', pos, dirVec, MaxThrust = maxThrust)
+        THRs.append(thr)
+
+        quat = quatAlignment(dirVec)
         thrustTags.append(f'{pad}\t<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}"/>')
         actTags.append(f'{pad}<motor name = "thruster{n}" site = "thrusterSite{n}" gear = "0 0 1 0 0 0" ctrlrange = "0 5"/>')
     
-    return "\n".join(thrustTags), "\n".join(actTags)
+    return "\n".join(thrustTags), "\n".join(actTags), THRs
 
 
 def makeMjXmlString():
@@ -200,8 +243,10 @@ def makeMjXmlString():
     ])
  
     rwFactory = simIncludeRW.rwFactory()
+    thrFactory = simIncludeThruster.thrusterFactory()
+
     rwBodies, rwActs, RWs = addRWsXML(rwPos, rwAxes, rwFactory)
-    thrSites, thrActs = addThrustersXML(thrustLocs, thrustDirs)
+    thrSites, thrActs, THRs = addThrustersXML(thrustLocs, thrustDirs, thrFactory)
  
     xml = f"""<mujoco model = "busWithRWsAndThrusters">
     <compiler angle = "radian" meshdir = ""/>
@@ -227,8 +272,7 @@ def makeMjXmlString():
 
 </mujoco>"""
 
-    return xml, RWs, thrSites, rwFactory
-
+    return xml, RWs, THRs, rwFactory, thrFactory
 
 
 def run(showPlots: bool = False):
@@ -249,7 +293,7 @@ def run(showPlots: bool = False):
     dynProcess.addTask(sim.CreateNewTask(dynTaskName, simulationTimeStepDyn))
     dynProcess.addTask(sim.CreateNewTask(fswTaskName, simulationTimeStepFsw))
 
-    xmlString, RWs, THRs, rwFactory = makeMjXmlString()
+    xmlString, RWs, THRs, rwFactory, thrFactory = makeMjXmlString()
     scene = mujoco.MJScene(xmlString)
     scene.ModelTag = "mujocoScene"
     sim.AddModelToTask(dynTaskName, scene)
@@ -261,9 +305,10 @@ def run(showPlots: bool = False):
     numRWs = len(RWs)
     numTHRs = len(THRs)
 
-    RWJoints = [busBody.getScalarJoint(f"rw{i + 1}Joint") for i in range(numRWs)]
+    RWBodies = [scene.getBody(f"rw{i + 1}Spin") for i in range(numRWs)]
+    RWJoints = [RWBodies[i].getScalarJoint(f"rw{i + 1}Joint") for i in range(numRWs)]
     RWActuators = [scene.getSingleActuator(f"rw{i + 1}Act") for i in range(numRWs)]
-    THRActuators = [scene.getSingleActuator(f"thrusterSite{i + 1}") for i in range(numTHRs)]
+    THRActuators = [scene.getSingleActuator(f"thruster{i + 1}") for i in range(numTHRs)]
 
     # -------------------------------------------------------------------------
     # 3) Add gravity
@@ -353,26 +398,46 @@ def run(showPlots: bool = False):
     thrDump.thrMinFireTime = 0.02       
 
     fswRwParamMsg = rwFactory.getConfigMessage()   
+    fswThrParamMsg = thrFactory.getConfigMessage()
 
     # -------------------------------------------------------------------------
     # 6) Distribute torques
     # -------------------------------------------------------------------------
-    distributor = RWTorqueDistributor(numRWs)
-    distributor.rwMotorTorqueInMsg.subscribeTo(rwMotorTorqueObj.rwMotorTorqueOutMsg)
-    sim.AddModelToTask(fswTaskName, distributor)
+    rwDistributor = RWTorqueDistributor(numRWs)
+    rwDistributor.rwMotorTorqueInMsg.subscribeTo(rwMotorTorqueObj.rwMotorTorqueOutMsg)
+    sim.AddModelToTask(fswTaskName, rwDistributor)
     for i in range(numRWs):
-        RWActuators[i].actuatorInMsg.subscribeTo(distributor.torqueOutMsgs[i])
+        RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
+
+    thrDistributor = ThrusterOnTimeDistributor(numTHRs, maxThrust=5.0, controlPeriod=1.0)
+    thrDistributor.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
+    sim.AddModelToTask(fswTaskName, thrDistributor)
+    for i in range(numTHRs):
+        THRActuators[i].actuatorInMsg.subscribeTo(thrDistributor.forceOutMsgs[i])
 
     # -------------------------------------------------------------------------
     # 6) Message Linking
     # -------------------------------------------------------------------------
+    vehicleConfigOut = messaging.VehicleConfigMsgPayload(ISCPntB_B=[1700,0,0, 0,1700,0, 0,0,1800])
+    vcMsg = messaging.VehicleConfigMsg().write(vehicleConfigOut)
+    mrpControl.vehConfigInMsg.subscribeTo(vcMsg)
+
     mrpControl.guidInMsg.subscribeTo(attError.attGuidOutMsg)
     mrpControl.rwParamsInMsg.subscribeTo(fswRwParamMsg)
 
+    speedCombiner = RWSpeedCombiner(RWJoints)
+    sim.AddModelToTask(fswTaskName, speedCombiner, 100)
+    mrpControl.rwSpeedsInMsg.subscribeTo(speedCombiner.speedOutMsg)
+
     rwMotorTorqueObj.rwParamsInMsg.subscribeTo(fswRwParamMsg)
+    thrForceMappingObj.vehConfigInMsg.subscribeTo(vcMsg)
     rwMotorTorqueObj.vehControlInMsg.subscribeTo(mrpControl.cmdTorqueOutMsg)
+
+    thrDesatControl.rwSpeedsInMsg.subscribeTo(speedCombiner.speedOutMsg)
     thrDesatControl.rwConfigDataInMsg.subscribeTo(fswRwParamMsg)
+    thrForceMappingObj.thrConfigInMsg.subscribeTo(fswThrParamMsg)
     thrForceMappingObj.cmdTorqueInMsg.subscribeTo(thrDesatControl.deltaHOutMsg)
+    thrDump.thrusterConfInMsg.subscribeTo(fswThrParamMsg)   
     thrDump.deltaHInMsg.subscribeTo(thrDesatControl.deltaHOutMsg)
     thrDump.thrusterImpulseInMsg.subscribeTo(thrForceMappingObj.thrForceCmdOutMsg)
 
@@ -403,9 +468,6 @@ def run(showPlots: bool = False):
     onTimeLog = thrDump.thrusterOnTimeOutMsg.recorder(samplingTime)
     sim.AddModelToTask(dynTaskName, onTimeLog)
 
-    mrpLog = busBody.getOrigin().stateOutMsg.recorder(samplingTime)
-    sim.AddModelToTask(dynTaskName, mrpLog)
-
     rwSpeedLogs = []
     for i in range(numRWs):
         rwSpeedLogs.append(RWJoints[i].stateDotOutMsg.recorder(samplingTime))
@@ -421,6 +483,15 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     sim.InitializeSimulation()
 
+    busFree = busBody.getFreeJoint()
+    busBody.setPosition(rN)
+    busFree.setVelocity(vN)
+
+    initialOmegas = [4000., 2000., 3500., 0.]
+    for i in range(numRWs):
+        omega_radps = initialOmegas[i] * macros.RPM
+        RWJoints[i].setVelocity(omega_radps) 
+
     sim.ConfigureStopTime(macros.sec2nano(10.0))
     sim.ExecuteSimulation()
 
@@ -434,18 +505,14 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     dataSigmaBR = attErrorLog.sigma_BR
     dataOmegaBR = attErrorLog.omega_BR_B
-    dataOmegaRW = mrpLog.wheelSpeeds
+    dataOmegaRW = np.column_stack([np.squeeze(rwSpeedLogs[i].state) for i in range(numRWs)])
     dataDH = deltaHLog.torqueRequestBody
     dataMap = thrMapLog.thrForce
     dataOnTime = onTimeLog.OnTimeRequest
 
-    dataRW = []
-    for i in range(numRWs):
-        dataRW.append(rwSpeedLogs[i].u_current)
-
     dataThr = []
     for i in range(numTHRs):
-        dataThr.append(thrForceLogs[i].thrustForce)
+        dataThr.append(thrForceLogs[i].input)
 
     np.set_printoptions(precision=16)
 
@@ -483,12 +550,43 @@ class RWTorqueDistributor(sysModel.SysModel):
                 out.input = payload.motorTorque[i]
                 self.torqueOutMsgs[i].write(out, CurrentSimNanos, self.moduleID)
 
+class RWSpeedCombiner(sysModel.SysModel):
+    def __init__(self, joints):
+        super().__init__()
+        self.ModelTag = "rwSpeedCombiner"
+        self.joints = joints
+        self.speedOutMsg = messaging.RWSpeedMsg()
+
+    def UpdateState(self, CurrentSimNanos):
+        speeds = [joint.stateDotOutMsg.read().state for joint in self.joints]
+        payload = messaging.RWSpeedMsgPayload()
+        payload.wheelSpeeds = speeds
+        self.speedOutMsg.write(payload, CurrentSimNanos, self.moduleID)
+
+
+class ThrusterOnTimeDistributor(sysModel.SysModel):
+    def __init__(self, numTHRs, maxThrust, controlPeriod):
+        super().__init__()
+        self.ModelTag = "thrOnTimeDistributor"
+        self.numTHRs = numTHRs
+        self.maxThrust = maxThrust
+        self.controlPeriod = controlPeriod  # seconds
+        self.onTimeInMsg = messaging.THRArrayOnTimeCmdMsgReader()
+        self.forceOutMsgs = [messaging.SingleActuatorMsg() for _ in range(numTHRs)]
+
+    def UpdateState(self, CurrentSimNanos):
+        if self.onTimeInMsg.isLinked():
+            payload = self.onTimeInMsg()
+            for i in range(self.numTHRs):
+                out = messaging.SingleActuatorMsgPayload()
+                out.input = self.maxThrust if payload.OnTimeRequest[i] > 0.0 else 0.0
+                self.forceOutMsgs[i].write(out, CurrentSimNanos, self.moduleID)
 
 
 if __name__ == "__main__":
     # --- XML TESTING ---
     
-    xmlString, _, _, _ = makeMjXmlString()
+    xmlString, *_ = makeMjXmlString()
  
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sat_momentumDump.xml"), "w") as f:
         f.write(xmlString)

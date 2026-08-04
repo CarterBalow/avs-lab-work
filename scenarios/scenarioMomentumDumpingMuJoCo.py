@@ -181,7 +181,7 @@ def addRWsXML(rwPos: list,
 
     for idx in range(numRW):
         n = idx + 1
-        rw = rwFactory.create('Honeywell_HR16', rwAxes[idx], maxMomentum=100.)
+        rw = rwFactory.create('Honeywell_HR16', rwAxes[idx], maxMomentum = 100.)
         RWs.append(rw)
         pos = rwPos[idx]
         quat = quatAlignment(rwAxes[idx])

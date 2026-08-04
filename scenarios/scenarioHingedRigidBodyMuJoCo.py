@@ -88,16 +88,16 @@ def makeMjXmlString(hubMass: float = 800.0, busIDiag: Tuple[float, float, float]
 
                 <site name = "thrustSite" pos = "0 0 0"/>
 
-                <body name = "panel1" pos = "-0.5 0.0 1.0">
-                    <joint name = "hinge1" pos = "0 0 0" axis = "0 1 0" ref = "0"/>
-                    <inertial pos = "-1.5 0 0" mass = "100.0" diaginertia = "100.0 50.0 50.0"/>
-                    <geom name = "panel1_geom" class = "panel_geom" pos = "-1.5 0 0"/>
+                <body name = "panel1" pos = "0.5 0.0 1.0">
+                    <joint name = "hinge1" pos = "0 0 0" axis = "0 -1 0" ref = "0"/>
+                    <inertial pos = "1.5 0 0" mass = "100.0" diaginertia = "100.0 50.0 50.0"/>
+                    <geom name = "panel1_geom" class = "panel_geom" pos = "1.5 0 0"/>
                 </body>
 
-                <body name = "panel2" pos = "0.5 0.0 1.0">
-                    <joint name = "hinge2" pos = "0 0 0" axis = "0 -1 0" ref = "0"/>
-                    <inertial pos = "1.5 0 0" mass = "100.0" diaginertia = "100.0 50.0 50.0"/>
-                    <geom name = "panel2_geom" class = "panel_geom" pos = "1.5 0 0"/>
+                <body name = "panel2" pos = "-0.5 0.0 1.0">
+                    <joint name = "hinge2" pos = "0 0 0" axis = "0 1 0" ref = "0"/>
+                    <inertial pos = "-1.5 0 0" mass = "100.0" diaginertia = "100.0 50.0 50.0"/>
+                    <geom name = "panel2_geom" class = "panel_geom" pos = "-1.5 0 0"/>
                 </body>
             </body>
         </worldbody>

@@ -2,7 +2,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, RigidBodyKinematics as rbk, simHelpers, simIncludeRW, simIncludeThruster, unitTestSupport
+from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, simHelpers, simIncludeRW, simIncludeThruster, unitTestSupport
 from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel, simpleNav
 from Basilisk.fswAlgorithms import mrpFeedback, inertial3D, attTrackingError, rwMotorTorque, thrMomentumManagement, thrForceMapping, thrMomentumDumping
 from Basilisk.architecture import messaging, sysModel
@@ -20,8 +20,8 @@ def plot_attitude_error(timeData, dataSigmaBR):
     for idx in range(3):
         plt.plot(timeData, dataSigmaBR[:, idx],
                  color = simHelpers.getLineColor(idx, 3),
-                 label=r'$\sigma_' + str(idx) + r'$')
-    plt.legend(loc='lower right')
+                 label = r'$\sigma_' + str(idx) + r'$')
+    plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel(r'Attitude Error $\sigma_{B/R}$')
 
@@ -36,8 +36,8 @@ def plot_rate_error(timeData, dataOmegaBR):
     for idx in range(3):
         plt.plot(timeData, dataOmegaBR[:, idx],
                  color = simHelpers.getLineColor(idx, 3),
-                 label=r'$\omega_{BR,' + str(idx+1) + r'}$')
-    plt.legend(loc='lower right')
+                 label = r'$\omega_{BR,' + str(idx+1) + r'}$')
+    plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('Rate Tracking Error (rad/s) ')
 
@@ -60,10 +60,10 @@ def plot_rw_momenta(timeData, dataOmegaRw, RW, numRW):
     for idx in range(numRW):
         plt.plot(timeData, dataOmegaRw[:, idx] * RW[idx].Js,
                  color = simHelpers.getLineColor(idx, numRW),
-                 label=r'$H_{' + str(idx+1) + r'}$')
+                 label = r'$H_{' + str(idx+1) + r'}$')
     plt.plot(timeData, totMomentumNorm, '--',
-             label=r'$\|H\|$')
-    plt.legend(loc='lower right')
+             label = r'$\|H\|$')
+    plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('RW Momentum (Nms)')
 
@@ -78,8 +78,8 @@ def plot_DH(timeData, dataDH):
     for idx in range(3):
         plt.plot(timeData, dataDH[:, idx],
                  color = simHelpers.getLineColor(idx, 3),
-                 label=r'$\Delta H_{' + str(idx+1) + r'}$')
-    plt.legend(loc='lower right')
+                 label = r'$\Delta H_{' + str(idx+1) + r'}$')
+    plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('Dumped momentum (Nms) ')
 
@@ -95,8 +95,8 @@ def plot_rw_speeds(timeData, dataOmegaRW, numRW):
     for idx in range(numRW):
         plt.plot(timeData, dataOmegaRW[:, idx] / macros.RPM,
                  color = simHelpers.getLineColor(idx, numRW),
-                 label=r'$\Omega_{' + str(idx+1) + r'}$')
-    plt.legend(loc='lower right')
+                 label = r'$\Omega_{' + str(idx+1) + r'}$')
+    plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('RW Speed (RPM) ')
 
@@ -111,8 +111,8 @@ def plot_thrImpulse(timeDataFSW, dataMap, numTh):
     for idx in range(numTh):
         plt.plot(timeDataFSW, dataMap[:, idx],
                  color = simHelpers.getLineColor(idx, numTh),
-                 label=r'$thrImpulse_{' + str(idx+1) + r'}$')
-    plt.legend(loc='lower right')
+                 label = r'$thrImpulse_{' + str(idx+1) + r'}$')
+    plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('Impulse requested [Ns]')
 
@@ -127,8 +127,8 @@ def plot_OnTimeRequest(timeData, dataOnTime, numTh):
     for idx in range(numTh):
         plt.plot(timeData, dataOnTime[:, idx],
                  color = simHelpers.getLineColor(idx, numTh),
-                 label=r'$OnTimeRequest_{' + str(idx+1) + r'}$')
-    plt.legend(loc='lower right')
+                 label = r'$OnTimeRequest_{' + str(idx+1) + r'}$')
+    plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('OnTimeRequest [sec]')
 
@@ -143,8 +143,8 @@ def plot_thrForce(timeDataFSW, dataThr, numTh):
     for idx in range(numTh):
         plt.plot(timeDataFSW, dataThr[idx],
                  color = simHelpers.getLineColor(idx, numTh),
-                 label=r'$thrForce_{' + str(idx+1) + r'}$')
-    plt.legend(loc='lower right')
+                 label = r'$thrForce_{' + str(idx+1) + r'}$')
+    plt.legend(loc = 'lower right')
     plt.xlabel('Time [min]')
     plt.ylabel('Thruster force [N]')
 
@@ -331,10 +331,10 @@ def run(showPlots: bool = False):
     rLEO = 7000. * 1000  # meters
     oe.a = rLEO
     oe.e = 0.0001
-    oe.i = 0.0 * macros.D2R
-    oe.Omega = 48.2 * macros.D2R
+    oe.i = 33.3 * macros.D2R
+    oe.Omega = 148.2 * macros.D2R
     oe.omega = 347.8 * macros.D2R
-    oe.f = 85.3 * macros.D2R
+    oe.f = 335 * macros.D2R
     rN, vN = orbitalMotion.elem2rv(muEarth, oe)
 
     # -------------------------------------------------------------------------
@@ -409,9 +409,9 @@ def run(showPlots: bool = False):
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
 
-    thrDistributor = ThrusterOnTimeDistributor(numTHRs, maxThrust=5.0, controlPeriod=1.0)
+    thrDistributor = ThrusterOnTimeDistributor(numTHRs, maxThrust=5.0, dynStepSec=0.1)
     thrDistributor.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
-    sim.AddModelToTask(fswTaskName, thrDistributor)
+    sim.AddModelToTask(dynTaskName, thrDistributor)
     for i in range(numTHRs):
         THRActuators[i].actuatorInMsg.subscribeTo(thrDistributor.forceOutMsgs[i])
 
@@ -565,21 +565,33 @@ class RWSpeedCombiner(sysModel.SysModel):
 
 
 class ThrusterOnTimeDistributor(sysModel.SysModel):
-    def __init__(self, numTHRs, maxThrust, controlPeriod):
+    def __init__(self, numTHRs, maxThrust, dynStepSec):
         super().__init__()
         self.ModelTag = "thrOnTimeDistributor"
         self.numTHRs = numTHRs
         self.maxThrust = maxThrust
-        self.controlPeriod = controlPeriod  # seconds
+        self.dynStepSec = dynStepSec
         self.onTimeInMsg = messaging.THRArrayOnTimeCmdMsgReader()
         self.forceOutMsgs = [messaging.SingleActuatorMsg() for _ in range(numTHRs)]
+        self.remainingOnTime = [0.0] * numTHRs
+        self.lastCmd = [0.0] * numTHRs
 
     def UpdateState(self, CurrentSimNanos):
         if self.onTimeInMsg.isLinked():
             payload = self.onTimeInMsg()
             for i in range(self.numTHRs):
+                cmd = payload.OnTimeRequest[i]
+                # new firing command just arrived -> (re)start the timer
+                if cmd > 0.0 and cmd != self.lastCmd[i]:
+                    self.remainingOnTime[i] = cmd
+                self.lastCmd[i] = cmd
+
                 out = messaging.SingleActuatorMsgPayload()
-                out.input = self.maxThrust if payload.OnTimeRequest[i] > 0.0 else 0.0
+                if self.remainingOnTime[i] > 0.0:
+                    out.input = self.maxThrust
+                    self.remainingOnTime[i] -= self.dynStepSec
+                else:
+                    out.input = 0.0
                 self.forceOutMsgs[i].write(out, CurrentSimNanos, self.moduleID)
 
 

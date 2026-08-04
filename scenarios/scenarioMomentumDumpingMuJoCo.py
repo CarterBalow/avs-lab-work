@@ -409,9 +409,9 @@ def run(showPlots: bool = False):
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
 
-    thrDistributor = ThrusterOnTimeDistributor(numTHRs, maxThrust=5.0, dynStepSec=0.1)
+    thrDistributor = ThrusterOnTimeDistributor(numTHRs, maxThrust = 5.0, controlPeriod = 1.0)
     thrDistributor.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
-    sim.AddModelToTask(dynTaskName, thrDistributor)
+    sim.AddModelToTask(fswTaskName, thrDistributor)
     for i in range(numTHRs):
         THRActuators[i].actuatorInMsg.subscribeTo(thrDistributor.forceOutMsgs[i])
 
@@ -565,33 +565,21 @@ class RWSpeedCombiner(sysModel.SysModel):
 
 
 class ThrusterOnTimeDistributor(sysModel.SysModel):
-    def __init__(self, numTHRs, maxThrust, dynStepSec):
+    def __init__(self, numTHRs, maxThrust, controlPeriod):
         super().__init__()
         self.ModelTag = "thrOnTimeDistributor"
         self.numTHRs = numTHRs
         self.maxThrust = maxThrust
-        self.dynStepSec = dynStepSec
+        self.controlPeriod = controlPeriod  # seconds
         self.onTimeInMsg = messaging.THRArrayOnTimeCmdMsgReader()
         self.forceOutMsgs = [messaging.SingleActuatorMsg() for _ in range(numTHRs)]
-        self.remainingOnTime = [0.0] * numTHRs
-        self.lastCmd = [0.0] * numTHRs
 
     def UpdateState(self, CurrentSimNanos):
         if self.onTimeInMsg.isLinked():
             payload = self.onTimeInMsg()
             for i in range(self.numTHRs):
-                cmd = payload.OnTimeRequest[i]
-                # new firing command just arrived -> (re)start the timer
-                if cmd > 0.0 and cmd != self.lastCmd[i]:
-                    self.remainingOnTime[i] = cmd
-                self.lastCmd[i] = cmd
-
                 out = messaging.SingleActuatorMsgPayload()
-                if self.remainingOnTime[i] > 0.0:
-                    out.input = self.maxThrust
-                    self.remainingOnTime[i] -= self.dynStepSec
-                else:
-                    out.input = 0.0
+                out.input = self.maxThrust if payload.OnTimeRequest[i] > 0.0 else 0.0
                 self.forceOutMsgs[i].write(out, CurrentSimNanos, self.moduleID)
 
 

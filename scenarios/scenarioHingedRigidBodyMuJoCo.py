@@ -184,18 +184,7 @@ def run(showPlots: bool = False):
         gravity.addGravityTarget(f"panel{i + 1}", panelBodies[i])
 
     # -------------------------------------------------------------------------
-    # 5) Setup data recording
-    # -------------------------------------------------------------------------
-    dataLog = busBody.getCenterOfMass().stateOutMsg.recorder()
-    pl1Log = hinge1.stateOutMsg.recorder()
-    pl2Log = hinge2.stateOutMsg.recorder()
-
-    sim.AddModelToTask(simTaskName, dataLog)
-    sim.AddModelToTask(simTaskName, pl1Log)
-    sim.AddModelToTask(simTaskName, pl2Log)
-
-    # -------------------------------------------------------------------------
-    # 6) Applying thrust
+    # 5) Applying thrust
     # -------------------------------------------------------------------------
     n = np.sqrt(muEarth / oe.a / oe.a / oe.a)
     P = 2. * np.pi / n
@@ -214,6 +203,21 @@ def run(showPlots: bool = False):
     scene.AddModelToDynamicsTask(forceConverter)
 
     thrustActuator.forceInMsg.subscribeTo(forceConverter.forceOutMsg)
+
+    # -------------------------------------------------------------------------
+    # 6) Setup data recording
+    # -------------------------------------------------------------------------
+    numDataPoints = 100
+    samplingTime = simHelpers.samplingTime(simulationTime, timeStep, numDataPoints)
+
+    dataLog = busBody.getCenterOfMass().stateOutMsg.recorder(samplingTime)
+    pl1Log = hinge1.stateOutMsg.recorder(samplingTime)
+    pl2Log = hinge2.stateOutMsg.recorder(samplingTime)
+
+    sim.AddModelToTask(simTaskName, dataLog)
+    sim.AddModelToTask(simTaskName, pl1Log)
+    sim.AddModelToTask(simTaskName, pl2Log)
+
 
     # -------------------------------------------------------------------------
     # 7) Setup orbit / initialize spacecraft state
@@ -242,16 +246,12 @@ def run(showPlots: bool = False):
     panel1data = pl1Log.state
     panel2data = pl2Log.state
     timeAxis = dataLog.times()
-
-    testData = dataLog.sigma_BN
     
     plt.close("all")
     figureList = {}
     figureList[fileName + "1"] = plotInertialPos(timeAxis, posData)
     figureList[fileName + "2"] = plotOrbitalMotion(timeAxis, posData, velData, muEarth)
     figureList[fileName + "3"] = plotAngDisp(timeAxis, panel1data, panel2data)
-
-    figureList[fileName + "4"] = plotInertialPos(timeAxis, testData)
 
     if showPlots:
         plt.show()

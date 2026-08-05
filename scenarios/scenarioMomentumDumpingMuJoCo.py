@@ -2,7 +2,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, simHelpers, simIncludeRW, simIncludeThruster, unitTestSupport
+from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, simHelpers, simIncludeRW, simIncludeThruster
 from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel, simpleNav
 from Basilisk.fswAlgorithms import mrpFeedback, inertial3D, attTrackingError, rwMotorTorque, thrMomentumManagement, thrForceMapping, thrMomentumDumping
 from Basilisk.architecture import messaging, sysModel
@@ -172,6 +172,7 @@ def quatAlignment(axis: list):
 def addRWsXML(rwPos: list, 
               rwAxes: list,
               rwFactory: simIncludeRW, 
+              maxMomentum: float = 100.,
               baseIndent: int = 3):
 
     numRW = len(rwPos)
@@ -181,18 +182,19 @@ def addRWsXML(rwPos: list,
 
     for idx in range(numRW):
         n = idx + 1
-        rw = rwFactory.create('Honeywell_HR16', rwAxes[idx], maxMomentum = 100.)
-        RWs.append(rw)
         pos = rwPos[idx]
-        quat = quatAlignment(rwAxes[idx])
+        rwAxis = rwAxes[idx]
 
+        rw = rwFactory.create('Honeywell_HR16', rwAxis, maxMomentum = maxMomentum)
+        RWs.append(rw)
+
+        quat = quatAlignment(rwAxis)
         rwTags.append(
 f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}">
 {pad}\t<joint name = "rw{n}Joint" pos = "0 0 0" axis = "0 0 1" ref = "0"/>
 {pad}\t<inertial pos = "0 0 0" mass = "{rw.mass}" diaginertia = "{rw.Jt} {rw.Jt} {rw.Js}"/>
 {pad}\t<geom name = "rw{n}Geom" type = "cylinder" size = "0.2 0.05" contype = "0" conaffinity = "0"/>
 {pad}</body>""")
-
         actTags.append(f'\t\t<motor name = "rw{n}Act" joint = "rw{n}Joint"/>')
 
     return "\n".join(rwTags), "\n".join(actTags), RWs
@@ -362,9 +364,9 @@ def run(showPlots: bool = False):
     decayTime = 10.0
     xi = 1.0
     I = np.diag([1700, 1700, 1800])
-    mrpControl.Ki = -1  # make value negative to turn off integral feedback
-    mrpControl.P = 3*np.max(I)/decayTime
-    mrpControl.K = (mrpControl.P/xi)*(mrpControl.P/xi)/np.max(I)
+    mrpControl.Ki = -1
+    mrpControl.P = 3 * np.max(I) / decayTime
+    mrpControl.K = (mrpControl.P/xi) * (mrpControl.P/xi) / np.max(I)
     mrpControl.integralLimit = 2. / mrpControl.Ki * 0.1
 
     controlAxes_B = [1, 0, 0, 0, 1, 0, 0, 0, 1]
@@ -401,7 +403,7 @@ def run(showPlots: bool = False):
     fswThrParamMsg = thrFactory.getConfigMessage()
 
     # -------------------------------------------------------------------------
-    # 6) Distribute torques
+    # 6) Distribute torques/
     # -------------------------------------------------------------------------
     rwDistributor = RWTorqueDistributor(numRWs)
     rwDistributor.rwMotorTorqueInMsg.subscribeTo(rwMotorTorqueObj.rwMotorTorqueOutMsg)
@@ -409,7 +411,7 @@ def run(showPlots: bool = False):
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
 
-    thrDistributor = ThrusterOnTimeDistributor(numTHRs, maxThrust = 5.0, controlPeriod = 1.0)
+    thrDistributor = ThrusterOnTimeDistributor(numTHRs, maxThrust = 5.0)
     thrDistributor.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
     sim.AddModelToTask(fswTaskName, thrDistributor)
     for i in range(numTHRs):
@@ -445,7 +447,7 @@ def run(showPlots: bool = False):
     # 7) Set up data recording
     # -------------------------------------------------------------------------
     numDataPoints = 5000
-    samplingTime = unitTestSupport.samplingTime(simulationTime, simulationTimeStepDyn, numDataPoints)
+    samplingTime = simHelpers.samplingTime(simulationTime, simulationTimeStepDyn, numDataPoints)
 
     sNavRec = simpleNavObj.attOutMsg.recorder(samplingTime)
     sim.AddModelToTask(dynTaskName, sNavRec)
@@ -524,6 +526,7 @@ def run(showPlots: bool = False):
     figureList[fileName + "_rateError"] = plot_rate_error(timeData, dataOmegaBR)
     figureList[fileName + "_rwMomenta"] = plot_rw_momenta(timeData, dataOmegaRW, RWs, numRWs)
     figureList[fileName + "_DH"] = plot_DH(timeData, dataDH)
+    figureList[fileName + "_rwSpeeds"] = plot_rw_speeds(timeData, dataOmegaRW, numRWs)
     figureList[fileName + "_thrImpulse"] = plot_thrImpulse(timeData, dataMap, numTHRs)
     figureList[fileName + "_OnTimeReq"] = plot_OnTimeRequest(timeData, dataOnTime, numTHRs)
     figureList[fileName + "_thrForce"] = plot_thrForce(timeData, dataThr, numTHRs)
@@ -565,12 +568,11 @@ class RWSpeedCombiner(sysModel.SysModel):
 
 
 class ThrusterOnTimeDistributor(sysModel.SysModel):
-    def __init__(self, numTHRs, maxThrust, controlPeriod):
+    def __init__(self, numTHRs, maxThrust):
         super().__init__()
         self.ModelTag = "thrOnTimeDistributor"
         self.numTHRs = numTHRs
         self.maxThrust = maxThrust
-        self.controlPeriod = controlPeriod  # seconds
         self.onTimeInMsg = messaging.THRArrayOnTimeCmdMsgReader()
         self.forceOutMsgs = [messaging.SingleActuatorMsg() for _ in range(numTHRs)]
 

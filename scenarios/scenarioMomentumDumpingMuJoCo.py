@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, simHelpers, simIncludeRW, simIncludeThruster
-from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel, simpleNav
+from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel, simpleNav, thrOnTimeToForce
 from Basilisk.fswAlgorithms import mrpFeedback, inertial3D, attTrackingError, rwMotorTorque, thrMomentumManagement, thrForceMapping, thrMomentumDumping
 from Basilisk.architecture import messaging, sysModel
 
@@ -249,6 +249,8 @@ def makeMjXmlString():
 
     rwBodies, rwActs, RWs = addRWsXML(rwPos, rwAxes, rwFactory)
     thrSites, thrActs, THRs = addThrustersXML(thrustLocs, thrustDirs, thrFactory)
+
+    r_BcB_B = np.array([0.0, 0.0, 1.28])
  
     xml = f"""<mujoco model = "busWithRWsAndThrusters">
     <compiler angle = "radian" meshdir = ""/>
@@ -411,11 +413,17 @@ def run(showPlots: bool = False):
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
 
-    thrDistributor = ThrusterOnTimeDistributor(numTHRs, maxThrust = 5.0)
-    thrDistributor.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
-    sim.AddModelToTask(fswTaskName, thrDistributor)
+    thrForceConverter = thrOnTimeToForce.ThrOnTimeToForce()
+    thrForceConverter.ModelTag = "thrOnTimeToForce"
     for i in range(numTHRs):
-        THRActuators[i].actuatorInMsg.subscribeTo(thrDistributor.forceOutMsgs[i])
+        thrForceConverter.addThruster()
+    thrForceConverter.setThrMag([thr.MaxThrust for thr in THRs])
+    thrForceConverter.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
+
+    sim.AddModelToTask(dynTaskName, thrForceConverter)
+
+    for i in range(numTHRs):
+        THRActuators[i].actuatorInMsg.subscribeTo(thrForceConverter.thrusterForceOutMsgs[i])
 
     # -------------------------------------------------------------------------
     # 6) Message Linking
@@ -565,24 +573,6 @@ class RWSpeedCombiner(sysModel.SysModel):
         payload = messaging.RWSpeedMsgPayload()
         payload.wheelSpeeds = speeds
         self.speedOutMsg.write(payload, CurrentSimNanos, self.moduleID)
-
-
-class ThrusterOnTimeDistributor(sysModel.SysModel):
-    def __init__(self, numTHRs, maxThrust):
-        super().__init__()
-        self.ModelTag = "thrOnTimeDistributor"
-        self.numTHRs = numTHRs
-        self.maxThrust = maxThrust
-        self.onTimeInMsg = messaging.THRArrayOnTimeCmdMsgReader()
-        self.forceOutMsgs = [messaging.SingleActuatorMsg() for _ in range(numTHRs)]
-
-    def UpdateState(self, CurrentSimNanos):
-        if self.onTimeInMsg.isLinked():
-            payload = self.onTimeInMsg()
-            for i in range(self.numTHRs):
-                out = messaging.SingleActuatorMsgPayload()
-                out.input = self.maxThrust if payload.OnTimeRequest[i] > 0.0 else 0.0
-                self.forceOutMsgs[i].write(out, CurrentSimNanos, self.moduleID)
 
 
 if __name__ == "__main__":

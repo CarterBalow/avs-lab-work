@@ -249,8 +249,6 @@ def makeMjXmlString():
 
     rwBodies, rwActs, RWs = addRWsXML(rwPos, rwAxes, rwFactory)
     thrSites, thrActs, THRs = addThrustersXML(thrustLocs, thrustDirs, thrFactory)
-
-    r_BcB_B = np.array([0.0, 0.0, 1.28])
  
     xml = f"""<mujoco model = "busWithRWsAndThrusters">
     <compiler angle = "radian" meshdir = ""/>
@@ -413,14 +411,9 @@ def run(showPlots: bool = False):
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
 
-    thrForceConverter = thrOnTimeToForce.ThrOnTimeToForce()
-    thrForceConverter.ModelTag = "thrOnTimeToForce"
-    for i in range(numTHRs):
-        thrForceConverter.addThruster()
-    thrForceConverter.setThrMag([thr.MaxThrust for thr in THRs])
+    thrForceConverter = MuJoCoJDynamicThruster(THRs, simulationTimeStepDyn * macros.NANO2SEC)
+    scene.AddModelToDynamicsTask(thrForceConverter)
     thrForceConverter.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
-
-    sim.AddModelToTask(dynTaskName, thrForceConverter)
 
     for i in range(numTHRs):
         THRActuators[i].actuatorInMsg.subscribeTo(thrForceConverter.thrusterForceOutMsgs[i])
@@ -573,6 +566,217 @@ class RWSpeedCombiner(sysModel.SysModel):
         payload = messaging.RWSpeedMsgPayload()
         payload.wheelSpeeds = speeds
         self.speedOutMsg.write(payload, CurrentSimNanos, self.moduleID)
+
+
+
+# -------------------------------------------------------------------------
+# -------------------------------------------------------------------------
+# ------------------- THRUSTER DYNAMIC EFFECTOR MUJOCO --------------------
+# -------------------------------------------------------------------------
+# -------------------------------------------------------------------------
+
+class THRRampPoint:
+    def __init__(self, timeDelta: float, thrustFactor: float, ispFactor: float = 1.0):
+        self.TimeDelta = timeDelta
+        self.ThrustFactor = thrustFactor
+        self.IspFactor = ispFactor
+
+class THROpState:
+    def __init__(self):
+        self.ThrustOnCmd = 0.0
+        self.ThrustFactor = 0.0
+        self.IspFactor = 0.0
+        self.ThrusterStartTime = 0.0
+        self.PreviousIterTime = 0.0
+        self.ThrustOnRampTime = 0.0
+        self.ThrustOffRampTime = 0.0
+        self.ThrustOnSteadyTime = 0.0
+        self.totalOnTime = 0.0
+
+def extractConfig(thr, index):
+    def get(name, default):
+        val = getattr(thr, name, None)
+        if val is None:
+            print(f"thruster {index}: {name} not found on config obj")
+            return default
+        return val
+
+    maxThrust = get("MaxThrust", 1.0)
+    minOnTime = get("MinOnTime", 0.0)
+    steadyIsp = get("steadyIsp", 226.0)
+    maxSwirlTorque = get("MaxSwirlTorque", 0.0)
+
+    onRampRaw = getattr(thr, "ThrusterOnRamp", None) or []
+    offRampRaw = getattr(thr, "ThrusterOffRamp", None) or []
+
+    onRamp = [THRRampPoint(p.TimeDelta, p.ThrustFactor, getattr(p, "IspFactor", 1.0)) for p in onRampRaw]
+    offRamp = [THRRampPoint(p.TimeDelta, p.ThrustFactor, getattr(p, "IspFactor", 1.0)) for p in offRampRaw]
+
+    return dict(
+        MaxThrust = maxThrust,
+        MinOnTime = minOnTime,
+        steadyIsp = steadyIsp,
+        MaxSwirlTorque = maxSwirlTorque,
+        ThrusterOnRamp = onRamp,
+        ThrusterOffRamp = offRamp,
+    )
+
+
+class MuJoCoJDynamicThruster(sysModel.SysModel):
+    def __init__(self, thrConfigObjs, dynTimeStep: float):
+        super().__init__()
+        self.ModelTag = "MuJoCoDynamicThruster"
+
+        self.numTHR = len(thrConfigObjs)
+        self.cfg = [extractConfig(t, i) for i, t in enumerate(thrConfigObjs)]
+        self.ops = [THROpState() for _ in range(self.numTHR)]
+
+        self.dt = dynTimeStep
+
+        self.onTimeInMsg = messaging.THRArrayOnTimeCmdMsgReader()
+        self.thrusterForceOutMsgs = [messaging.SingleActuatorMsg() for _ in range(self.numTHR)]
+
+        self.newThrustCmds = [0.0] * self.numTHR
+        self.prevCommandTime = None
+        self.prevCallTime = None
+
+    def ReadInputs(self):
+        if not self.onTimeInMsg.isLinked():
+            return False
+        payload = self.onTimeInMsg()
+        writtenTime = self.onTimeInMsg.timeWritten()
+        dataGood = self.onTimeInMsg.isWritten()
+        if not dataGood or writtenTime == self.prevCommandTime:
+            return False
+        self.prevCommandTime = writtenTime
+        for i in range(self.numTHR):
+            self.newThrustCmds[i] = payload.OnTimeRequest[i]
+        return True
+
+    def configureThrustRequests(self, currentTime):
+        for i in range(self.numTHR):
+            cmd = self.newThrustCmds[i]
+            op = self.ops[i]
+            minOnTime = self.cfg[i]["MinOnTime"]
+
+            if cmd >= minOnTime:
+                op.ThrustOnCmd = cmd
+            else:
+                op.ThrustOnCmd = cmd if op.ThrustFactor > 0.0 else 0.0
+
+            op.ThrusterStartTime = currentTime
+            op.PreviousIterTime = currentTime
+            op.ThrustOnRampTime = 0.0
+            op.ThrustOnSteadyTime = 0.0
+            op.ThrustOffRampTime = 0.0
+
+            self.newThrustCmds[i] = 0.0
+
+    @staticmethod
+    def thrFactorToTime(op, ramp):
+        last = ramp[-1]
+        rampTime = last.TimeDelta
+        diff = last.ThrustFactor - op.ThrustFactor
+        rampDirection = 1.0 if diff >= 0 else -1.0
+
+        prevValidThrFactor = 0.0 if rampDirection > 0 else 1.0
+        prevValidDelta = 0.0
+
+        for pt in ramp:
+            pointCheck = (pt.ThrustFactor <= op.ThrustFactor) if rampDirection > 0 else (pt.ThrustFactor >= op.ThrustFactor)
+            if pointCheck:
+                prevValidThrFactor = pt.ThrustFactor
+                prevValidDelta = pt.TimeDelta
+                continue
+            denom = (pt.ThrustFactor - prevValidThrFactor)
+            if denom == 0.0:
+                rampTime = prevValidDelta
+            else:
+                rampTime = (pt.TimeDelta - prevValidDelta) / denom * (op.ThrustFactor - prevValidThrFactor) + prevValidDelta
+            rampTime = max(rampTime, 0.0)
+            break
+
+        return rampTime
+
+    def computeThrusterFire(self, i, currentTime):
+        op = self.ops[i]
+        onRamp = self.cfg[i]["ThrusterOnRamp"]
+
+        if op.ThrustOnRampTime == 0.0 and len(onRamp) > 0:
+            op.ThrustOnRampTime = self.thrFactorToTime(op, onRamp)
+
+        localOnRamp = max((currentTime - op.PreviousIterTime) + op.ThrustOnRampTime, 0.0)
+
+        prevTHR, prevIsp, prevDelta = 0.0, 0.0, 0.0
+        for pt in onRamp:
+            if localOnRamp < pt.TimeDelta:
+                denomT = (pt.TimeDelta - prevDelta)
+                op.ThrustFactor = (pt.ThrustFactor - prevTHR) / denomT * (localOnRamp - prevDelta) + prevTHR
+                op.IspFactor = (pt.IspFactor - prevIsp) / denomT * (localOnRamp - prevDelta) + prevIsp
+                op.ThrustOnRampTime = localOnRamp
+                op.totalOnTime += currentTime - op.PreviousIterTime
+                op.PreviousIterTime = currentTime
+                return 
+            prevTHR, prevIsp, prevDelta = pt.ThrustFactor, pt.IspFactor, pt.TimeDelta
+
+        op.ThrustOnSteadyTime += currentTime - op.PreviousIterTime
+        op.totalOnTime += currentTime - op.PreviousIterTime
+        op.PreviousIterTime = currentTime
+        op.ThrustFactor = 1.0
+        op.IspFactor = 1.0
+        op.ThrustOffRampTime = 0.0
+
+    def computeThrusterShut(self, i, currentTime):
+        op = self.ops[i]
+        offRamp = self.cfg[i]["ThrusterOffRamp"]
+
+        if op.ThrustOffRampTime == 0.0 and len(offRamp) > 0:
+            op.ThrustOffRampTime = self.thrFactorToTime(op, offRamp)
+
+        localOffRamp = max((currentTime - op.PreviousIterTime) + op.ThrustOffRampTime, 0.0)
+
+        prevTHR, prevIsp, prevDelta = 1.0, 1.0, 0.0
+        for pt in offRamp:
+            if localOffRamp < pt.TimeDelta:
+                denomT = (pt.TimeDelta - prevDelta)
+                op.ThrustFactor = (pt.ThrustFactor - prevTHR) / denomT * (localOffRamp - prevDelta) + prevTHR
+                op.IspFactor = (pt.IspFactor - prevIsp) / denomT * (localOffRamp - prevDelta) + prevIsp
+                op.ThrustOffRampTime = localOffRamp
+                op.PreviousIterTime = currentTime
+                return
+            prevTHR, prevIsp, prevDelta = pt.ThrustFactor, pt.IspFactor, pt.TimeDelta
+
+        op.ThrustFactor = 0.0
+        op.IspFactor = 0.0
+        op.ThrustOnRampTime = 0.0
+
+    def UpdateState(self, CurrentSimNanos):
+        currentTime = CurrentSimNanos * macros.NANO2SEC
+
+        if self.ReadInputs():
+            self.configureThrustRequests(currentTime)
+
+        if self.prevCallTime is None:
+            dt = self.dt
+        else:
+            dt = currentTime - self.prevCallTime
+        self.prevCallTime = currentTime
+
+        for i in range(self.numTHR):
+            op = self.ops[i]
+            stillFiring = (op.ThrustOnCmd + op.ThrusterStartTime - currentTime) >= -dt * 10E-10 and op.ThrustOnCmd > 0.0
+
+            if stillFiring:
+                self.computeThrusterFire(i, currentTime)
+            elif op.ThrustFactor > 0.0:
+                self.computeThrusterShut(i, currentTime)
+
+            force = self.cfg[i]["MaxThrust"] * op.ThrustFactor
+
+            payload = messaging.SingleActuatorMsgPayload()
+            payload.input = force
+            self.thrusterForceOutMsgs[i].write(payload, CurrentSimNanos, self.moduleID)
+
 
 
 if __name__ == "__main__":

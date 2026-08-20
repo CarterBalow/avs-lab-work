@@ -190,7 +190,7 @@ def addRWsXML(rwPos: list,
 
         quat = quatAlignment(rwAxis)
         rwTags.append(
-f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}">
+f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" zaxis = "{rwAxis[0]} {rwAxis[1]} {rwAxis[2]}">
 {pad}\t<joint name = "rw{n}Joint" pos = "0 0 0" axis = "0 0 1" ref = "0"/>
 {pad}\t<inertial pos = "0 0 0" mass = "{rw.mass}" diaginertia = "{rw.Jt} {rw.Jt} {rw.Js}"/>
 {pad}\t<geom name = "rw{n}Geom" type = "cylinder" size = "0.2 0.05" contype = "0" conaffinity = "0"/>
@@ -220,7 +220,7 @@ def addThrustersXML(thrustLocs: list,
         THRs.append(thr)
 
         quat = quatAlignment(dirVec)
-        thrustTags.append(f'{pad}\t<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" quat = "{quat}"/>')
+        thrustTags.append(f'{pad}\t<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" zaxis = "{dirVec[0]} {dirVec[1]} {dirVec[2]}"/>')
         actTags.append(f'{pad}<motor name = "thruster{n}" site = "thrusterSite{n}" gear = "0 0 1 0 0 0" ctrlrange = "0 5"/>')
     
     return "\n".join(thrustTags), "\n".join(actTags), THRs
@@ -298,6 +298,7 @@ def run(showPlots: bool = False):
     xmlString, RWs, THRs, rwFactory, thrFactory = makeMjXmlString()
     scene = mujoco.MJScene(xmlString)
     scene.ModelTag = "mujocoScene"
+    scene.extraEoMCall = True
     sim.AddModelToTask(dynTaskName, scene)
 
     # -------------------------------------------------------------------------
@@ -531,6 +532,18 @@ def run(showPlots: bool = False):
     figureList[fileName + "_thrImpulse"] = plot_thrImpulse(timeData, dataMap, numTHRs)
     figureList[fileName + "_OnTimeReq"] = plot_OnTimeRequest(timeData, dataOnTime, numTHRs)
     figureList[fileName + "_thrForce"] = plot_thrForce(timeData, dataThr, numTHRs)
+
+    np.savez(
+        "new_run.npz",
+        timeData=timeData,
+        dataSigmaBR=dataSigmaBR,
+        dataOmegaBR=dataOmegaBR,
+        dataDH=dataDH,
+        dataMap=dataMap,
+        dataOnTime=dataOnTime,
+        dataThr=np.array(dataThr),
+        dataOmegaRW=dataOmegaRW,
+    )
 
     if showPlots:
         plt.show()

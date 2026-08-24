@@ -151,24 +151,6 @@ def plot_thrForce(timeDataFSW, dataThr, numTh):
     return fig
 
 
-def quatAlignment(axis: list):
-    ax = np.array(axis, dtype = float)
-    ax = ax / np.linalg.norm(ax)
-    z = np.array([0.0, 0.0, 1.0])
- 
-    w = 1.0 + np.dot(z, ax)
-    if w < 1e-8:
-        perp = np.array([1.0, 0.0, 0.0]) if abs(ax[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
-        perp = perp - ax * np.dot(perp, ax)
-        perp = perp / np.linalg.norm(perp)
-        return f"0 {perp[0]:.8f} {perp[1]:.8f} {perp[2]:.8f}"
- 
-    v = np.cross(z, ax)
-    q = np.array([w, v[0], v[1], v[2]])
-    q = q / np.linalg.norm(q)
-    return f"{q[0]:.8f} {q[1]:.8f} {q[2]:.8f} {q[3]:.8f}"
-
-
 def addRWsXML(rwPos: list, 
               rwAxes: list,
               rwFactory: simIncludeRW, 
@@ -177,6 +159,7 @@ def addRWsXML(rwPos: list,
 
     numRW = len(rwPos)
     pad = "\t" * baseIndent
+    varRWModel = messaging.BalancedWheels
 
     rwTags, actTags, RWs = [], [], []
 
@@ -185,17 +168,16 @@ def addRWsXML(rwPos: list,
         pos = rwPos[idx]
         rwAxis = rwAxes[idx]
 
-        rw = rwFactory.create('Honeywell_HR16', rwAxis, maxMomentum = maxMomentum)
+        rw = rwFactory.create('Honeywell_HR16', rwAxis, maxMomentum = maxMomentum, RWModel = varRWModel)
         RWs.append(rw)
 
-        quat = quatAlignment(rwAxis)
         rwTags.append(
 f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" zaxis = "{rwAxis[0]} {rwAxis[1]} {rwAxis[2]}">
 {pad}\t<joint name = "rw{n}Joint" pos = "0 0 0" axis = "0 0 1" ref = "0"/>
 {pad}\t<inertial pos = "0 0 0" mass = "{rw.mass}" diaginertia = "{rw.Jt} {rw.Jt} {rw.Js}"/>
 {pad}\t<geom name = "rw{n}Geom" type = "cylinder" size = "0.2 0.05" contype = "0" conaffinity = "0"/>
 {pad}</body>""")
-        actTags.append(f'\t\t<motor name = "rw{n}Act" joint = "rw{n}Joint"/>')
+        actTags.append(f'\t\t<motor name = "rw{n}Act" joint = "rw{n}Joint" ctrlrange = "{-rw.u_max} {rw.u_max}" ctrllimited = "true"/>')
 
     return "\n".join(rwTags), "\n".join(actTags), RWs
 
@@ -219,7 +201,6 @@ def addThrustersXML(thrustLocs: list,
         thr = thrFactory.create('MOOG_Monarc_5', pos, dirVec, MaxThrust = maxThrust)
         THRs.append(thr)
 
-        quat = quatAlignment(dirVec)
         thrustTags.append(f'{pad}\t<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" zaxis = "{dirVec[0]} {dirVec[1]} {dirVec[2]}"/>')
         actTags.append(f'{pad}<motor name = "thruster{n}" site = "thrusterSite{n}" gear = "0 0 1 0 0 0" ctrlrange = "0 5"/>')
     
@@ -318,7 +299,6 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     gravity = NBodyGravity.NBodyGravity()
     gravity.ModelTag = "gravity"
-    scene.AddModelToDynamicsTask(gravity)
 
     muEarth = 0.3986004415e15  # [m^3/s^2]
     earthPm = pointMassGravityModel.PointMassGravityModel()
@@ -326,6 +306,8 @@ def run(showPlots: bool = False):
     gravity.addGravitySource("earth", earthPm, isCentralBody = True)
 
     gravity.addGravityTarget("hub", busBody)
+
+    scene.AddModelToDynamicsTask(gravity)
 
     # -------------------------------------------------------------------------
     # 4) Initial conditions
@@ -422,7 +404,7 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     # 6) Message Linking
     # -------------------------------------------------------------------------
-    vehicleConfigOut = messaging.VehicleConfigMsgPayload(ISCPntB_B=[1700,0,0, 0,1700,0, 0,0,1800])
+    vehicleConfigOut = messaging.VehicleConfigMsgPayload(ISCPntB_B = [1700,0,0, 0,1700,0, 0,0,1800])
     vcMsg = messaging.VehicleConfigMsg().write(vehicleConfigOut)
     mrpControl.vehConfigInMsg.subscribeTo(vcMsg)
 

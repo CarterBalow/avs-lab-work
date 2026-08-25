@@ -212,7 +212,7 @@ def makeMjXmlString():
     hubIxx, hubIyy, hubIzz = 1700.0, 1700.0, 1800.0
  
     c = 2**-0.5
-    rwPos = [[0.0, 0.0, 0.0]] * 4
+    rwPos = [[0.0, 0.0, 1.28]] * 4
     rwAxes = [[c, 0, c], [0, c, c], [-c, 0, c], [0, -c, c]]
 
     a, b = 1.0, 1.28
@@ -237,7 +237,7 @@ def makeMjXmlString():
     <worldbody>
         <body name = "hub" pos = "0 0 0">
             <freejoint name = "busFree"/>
-            <inertial pos = "0 0 0" mass = "{hubMass}" diaginertia = "{hubIxx} {hubIyy} {hubIzz}"/>
+            <inertial pos = "0 0 {b}" mass = "{hubMass}" diaginertia = "{hubIxx} {hubIyy} {hubIzz}"/>
             <geom name = "hubVisual" type = "box" size = "1 1 1.28" rgba = "1 1 1 1"/>
 
 {thrSites}
@@ -514,18 +514,6 @@ def run(showPlots: bool = False):
     figureList[fileName + "_thrImpulse"] = plot_thrImpulse(timeData, dataMap, numTHRs)
     figureList[fileName + "_OnTimeReq"] = plot_OnTimeRequest(timeData, dataOnTime, numTHRs)
     figureList[fileName + "_thrForce"] = plot_thrForce(timeData, dataThr, numTHRs)
-
-    np.savez(
-        "new_run.npz",
-        timeData=timeData,
-        dataSigmaBR=dataSigmaBR,
-        dataOmegaBR=dataOmegaBR,
-        dataDH=dataDH,
-        dataMap=dataMap,
-        dataOnTime=dataOnTime,
-        dataThr=np.array(dataThr),
-        dataOmegaRW=dataOmegaRW,
-    )
 
     if showPlots:
         plt.show()

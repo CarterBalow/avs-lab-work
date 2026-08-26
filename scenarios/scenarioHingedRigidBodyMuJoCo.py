@@ -8,9 +8,12 @@ from Basilisk.architecture import messaging, sysModel
 from Basilisk.simulation import NBodyGravity, mujoco, pointMassGravityModel
 from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, simHelpers, RigidBodyKinematics
 
+# Used to tag saved figs with name of file
 fileName = os.path.basename(os.path.splitext(__file__)[0])
 
-
+#--------------------------------------------------------------------------
+# PLOTTING FUNCTIONS
+# -------------------------------------------------------------------------
 def plotInertialPos(timeAxis: np.ndarray, posData: np.ndarray) -> plt.Figure:
     """Plots inertial position vector componenets"""
     fig = plt.figure(num = 1, clear = True)
@@ -63,8 +66,10 @@ def plotAngDisp(timeAxis: np.ndarray, panel1thetaLog: np.ndarray, panel2thetaLog
 
     return fig
 
-
-def makeMjXmlString(hubMass: float = 800.0, busIDiag: Tuple[float, float, float] = (900.0, 800.0, 600.0),):
+# makeMjXmlString: MuJoCo string constuctor, creates MJ model with the following inputs:
+# - hubMass: mass of the s/c hub
+# - busIDiag: Tuple list representing diagonal of inertia matrix I (assuming symmetric)
+def makeMjXmlString(hubMass: float = 800.0, busIDiag: Tuple[float, float, float] = (900.0, 800.0, 600.0)):
     
     ixx, iyy, izz = busIDiag
     
@@ -112,53 +117,59 @@ def run(showPlots: bool = False):
     simTaskName = "simTask"
     simProcessName = "simProcess"
 
-    simulationTime = macros.min2nano(10.0)
     timeStep = macros.sec2nano(0.1)
 
     sim = SimulationBaseClass.SimBaseClass()
     dynProcess = sim.CreateNewProcess(simProcessName)
     dynProcess.addTask(sim.CreateNewTask(simTaskName, timeStep))
 
+    # Constructing MJ XML string and loaded into MJScene dynamics model
     xmlString = makeMjXmlString()
     scene = mujoco.MJScene(xmlString)
     scene.ModelTag = "mujocoScene"
     sim.AddModelToTask(simTaskName, scene)
 
+    # Actuator added to site in MJScene, allows for thruster force
     thrustActuator = scene.addForceActuator("thrustForce", "thrustSite")
 
     # -------------------------------------------------------------------------
     # 2) Retrieve spacecraft componenets
     # -------------------------------------------------------------------------
+    # Pull handles of hub/panel bodies from XML
     busBody = scene.getBody("hub")
     panelBodies = [scene.getBody(name) for name in ("panel1", "panel2")]
     numPanels = len(panelBodies)
 
+    # Pull scalar joints connnecting panels
     hinge1 = panelBodies[0].getScalarJoint("hinge1")
     hinge2 = panelBodies[1].getScalarJoint("hinge2")
 
     # -------------------------------------------------------------------------
     # 3) Adding damping/stiffness to panel hinges
     # ------------------------------------------------------------------------- 
-
+    # Damping/stiffness values initizalized
     k = 1000.0
     c = 0.0
 
     springDampers = []
     for jointName, body in [("hinge1", panelBodies[0]), ("hinge2", panelBodies[1])]:
+        # Retrieving joints and adding actuators to mimic damping/stiffness effects
         actuator = scene.addJointSingleActuator(f"{jointName}Actuator", jointName)
         joint = body.getScalarJoint(jointName)
 
+        # Custom spring damper sys model application (see associated function), computes 
+        # restoring force based on torsional damping/stiffness coefficients
         sd = JointSpringDamper(k = k, c = c, thetaRef = 0.0)
         sd.ModelTag = f"{jointName}SpringDamper"
-        sd.jointPosInMsg.subscribeTo(joint.stateOutMsg)
-        sd.jointVelInMsg.subscribeTo(joint.stateDotOutMsg)
-        actuator.actuatorInMsg.subscribeTo(sd.actuatorOutMsg)
+        sd.jointPosInMsg.subscribeTo(joint.stateOutMsg) # feed in hinge angle
+        sd.jointVelInMsg.subscribeTo(joint.stateDotOutMsg) # feed in hinge angular rate
+        actuator.actuatorInMsg.subscribeTo(sd.actuatorOutMsg) # apply computed torque to actuator
 
         scene.AddModelToDynamicsTask(sd)
         springDampers.append(sd) 
 
     # -------------------------------------------------------------------------
-    # 4) Add gravity
+    # 4) Add gravity and set up orbital elements
     # -------------------------------------------------------------------------
     oe = orbitalMotion.ClassicElements()
     rLEO = 7000. * 1000  # meters
@@ -171,14 +182,17 @@ def run(showPlots: bool = False):
     muEarth = 0.3986004415e15  # [m^3/s^2]
     rN, vN = orbitalMotion.elem2rv(muEarth, oe)
 
+    # Adding N-Body gravity model into MJscene
     gravity = NBodyGravity.NBodyGravity()
     gravity.ModelTag = "gravity"
     scene.AddModelToDynamicsTask(gravity)
 
+    # Applying Earth point mass gravity effects to model, make central body
     earthPm = pointMassGravityModel.PointMassGravityModel()
     earthPm.muBody = muEarth
     gravity.addGravitySource("earth", earthPm, isCentralBody = True)
 
+    # Gravity effects added to each body in scene
     gravity.addGravityTarget("hub", busBody)
     for i in range(numPanels):
         gravity.addGravityTarget(f"panel{i + 1}", panelBodies[i])
@@ -186,44 +200,48 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     # 5) Applying thrust
     # -------------------------------------------------------------------------
-    n = np.sqrt(muEarth / oe.a / oe.a / oe.a)
-    P = 2. * np.pi / n
+    # Setting simulation time
+    n = np.sqrt(muEarth / oe.a / oe.a / oe.a) # mean motion [rad/s]
+    P = 2. * np.pi / n # orbital period [s] 
     simulationTimeFactor = 0.01
     simulationTime = macros.sec2nano(simulationTimeFactor * P)
 
-    T2 = macros.sec2nano(935.)
+    T2 = macros.sec2nano(935.) # time it takes to achieve correct deltaV (see original file)
     burnStart = simulationTime
     burnEnd = simulationTime + T2
 
+    # Correctly applies external forcing to site. This custom sys model is required to transform 
+    # the provided inertial force to a force at site needed for thurst actuator
     forceConverter = InertialForceToSiteActuator()
     forceConverter.scStateInMsg.subscribeTo(busBody.getCenterOfMass().stateOutMsg)
-    forceConverter.setForce_N([-2050.0, -1430.0, -0.00076])
+    forceConverter.setForce_N([-2050.0, -1430.0, -0.00076]) # desired inertial-frame thrust vector [N]
     forceConverter.setBurnWindow(burnStartNanos = burnStart, burnEndNanos = burnEnd)
     forceConverter.ModelTag = "forceConverter"
     scene.AddModelToDynamicsTask(forceConverter)
 
+    # Wiring converted force to thrust actuator
     thrustActuator.forceInMsg.subscribeTo(forceConverter.forceOutMsg)
 
     # -------------------------------------------------------------------------
     # 6) Setup data recording
     # -------------------------------------------------------------------------
-    numDataPoints = 100
+    numDataPoints = 100 # sampling rate based on this
     samplingTime = simHelpers.samplingTime(simulationTime, timeStep, numDataPoints)
 
     dataLog = busBody.getCenterOfMass().stateOutMsg.recorder(samplingTime)
-    pl1Log = hinge1.stateOutMsg.recorder(samplingTime)
-    pl2Log = hinge2.stateOutMsg.recorder(samplingTime)
+    pl1Log = hinge1.stateOutMsg.recorder(samplingTime) # data log for panel 1 (recording at hinge)
+    pl2Log = hinge2.stateOutMsg.recorder(samplingTime) # data log for panel 2 (recording at hinge)
 
     sim.AddModelToTask(simTaskName, dataLog)
     sim.AddModelToTask(simTaskName, pl1Log)
     sim.AddModelToTask(simTaskName, pl2Log)
-
 
     # -------------------------------------------------------------------------
     # 7) Setup orbit / initialize spacecraft state
     # -------------------------------------------------------------------------
     sim.InitializeSimulation()
 
+    # Setting initial conditions
     busFree = busBody.getFreeJoint()
     busBody.setPosition(rN)
     busFree.setVelocity(vN)
@@ -241,12 +259,14 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     # 9) Post processing and plotting
     # -------------------------------------------------------------------------
-    posData = dataLog.r_BN_N
-    velData = dataLog.v_BN_N
-    panel1data = pl1Log.state
-    panel2data = pl2Log.state
-    timeAxis = dataLog.times()
-    
+    # Retrieving relevant data from logs
+    posData = dataLog.r_BN_N # hub inertial position
+    velData = dataLog.v_BN_N # hub inertial velocity
+    panel1data = pl1Log.state # panel 1 angle
+    panel2data = pl2Log.state # panel 2 angle
+    timeAxis = dataLog.times() # time data
+
+    # Generating plots
     plt.close("all")
     figureList = {}
     figureList[fileName + "1"] = plotInertialPos(timeAxis, posData)
@@ -259,50 +279,66 @@ def run(showPlots: bool = False):
     return figureList
 
 
+# -------------------------------------------------------------------------
+# InertialForceToSiteActuator: custom sys model to convert fixed inertial-frame
+#   thrust force into body-frame force at specified site
+# -------------------------------------------------------------------------
 class InertialForceToSiteActuator(sysModel.SysModel):
     def __init__(self):
         super().__init__()
-        self.force_N = np.zeros(3)
+        self.force_N = np.zeros(3) # desired thrust force (inertial)
         self.burnStartNanos = 0
         self.burnEndNanos = 0
 
-        self.scStateInMsg = messaging.SCStatesMsgReader()
-        self.forceOutMsg = messaging.ForceAtSiteMsg()
+        self.scStateInMsg = messaging.SCStatesMsgReader() # s/c state for current attitude
+        self.forceOutMsg = messaging.ForceAtSiteMsg() # output force at actuator site
 
     def setForce_N(self, force_N):
+        """Sets desired thrust force vector (inertial)"""
         self.force_N = np.array(force_N)
 
     def setBurnWindow(self, burnStartNanos, burnEndNanos):
+        """Sets simulation time window during burn"""
         self.burnStartNanos = burnStartNanos
         self.burnEndNanos = burnEndNanos
 
     def UpdateState(self, CurrentSimNanos):
+        """Called at each simulation step, computes output force message"""
         if self.burnStartNanos <= CurrentSimNanos <= self.burnEndNanos:
             state = self.scStateInMsg()
             dcm_BN = RigidBodyKinematics.MRP2C(np.array(state.sigma_BN))
-            force_B = dcm_BN @ self.force_N
+            force_B = dcm_BN @ self.force_N # inertial thrust converted to body during burn
         else:
-            force_B = np.zeros(3)
+            force_B = np.zeros(3) # no thrust outside burn
 
         # NOTE: frames S and B in this scenario are identical, thus force_S = force_B
         self.forceOutMsg.write(messaging.ForceAtSiteMsgPayload(force_S = force_B), self.moduleID, CurrentSimNanos)
 
-
+# -------------------------------------------------------------------------
+# JointSpringDamper: custom sys model to incorporate torsional spring effects
+#   torque for a hinge joint in MuJoCo
+#   INPUTS:
+#       - k : stiffness coefficient
+#       - c : damping coefficient
+#       - thetaRef : reference angle to equilibrium
+# -------------------------------------------------------------------------
 class JointSpringDamper(sysModel.SysModel):
     def __init__(self, k: float, c: float, thetaRef: float):
         super().__init__()
-        self.k = k
-        self.c = c
-        self.thetaRef = thetaRef
+        self.k = k # stiffness [Nm / rad]
+        self.c = c # damping [Nms / rad]
+        self.thetaRef = thetaRef # equilibrium theta [rad]
 
-        self.jointPosInMsg = messaging.ScalarJointStateMsgReader()
-        self.jointVelInMsg = messaging.ScalarJointStateMsgReader()
-        self.actuatorOutMsg = messaging.SingleActuatorMsg()
+        self.jointPosInMsg = messaging.ScalarJointStateMsgReader() # current hinge angle
+        self.jointVelInMsg = messaging.ScalarJointStateMsgReader() # current hinge angular vel
+        self.actuatorOutMsg = messaging.SingleActuatorMsg() # outpur torque command
 
     def UpdateState(self, CurrentSimNanos):
+        """Computes simple linear spring-damper restoring torque at each simulation step"""
         theta = self.jointPosInMsg().state
         thetaDot = self.jointVelInMsg().state
 
+        # Classic spring damper law
         torque = -self.k * (theta - self.thetaRef) - self.c * thetaDot
 
         payload = messaging.SingleActuatorMsgPayload()

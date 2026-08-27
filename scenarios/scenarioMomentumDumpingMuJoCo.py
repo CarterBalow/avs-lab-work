@@ -437,11 +437,13 @@ def run(showPlots: bool = False):
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
 
+    # thrOnTimeToForce used to convert on-time commands from FSW stack to instant on/off
+    # thruster actuator messages for MuJoCo thrusters
     thrForceConverter = thrOnTimeToForce.ThrOnTimeToForce()
     thrForceConverter.ModelTag = "thrOnTimeToForce"
     for _ in range(numTHRs):
         thrForceConverter.addThruster()
-    thrForceConverter.setThrMag([thr.MaxThrust for thr in THRs])   # must match addThruster() order
+    thrForceConverter.setThrMag([thr.MaxThrust for thr in THRs])
 
     scene.AddModelToDynamicsTask(thrForceConverter)
     thrForceConverter.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)

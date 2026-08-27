@@ -11,7 +11,7 @@ from Basilisk.utilities import SimulationBaseClass, macros, orbitalMotion, simHe
 # Used to tag saved figs with name of file
 fileName = os.path.basename(os.path.splitext(__file__)[0])
 
-#--------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # PLOTTING FUNCTIONS
 # -------------------------------------------------------------------------
 def plotInertialPos(timeAxis: np.ndarray, posData: np.ndarray) -> plt.Figure:

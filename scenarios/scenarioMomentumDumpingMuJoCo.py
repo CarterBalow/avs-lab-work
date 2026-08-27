@@ -9,9 +9,12 @@ from Basilisk.architecture import messaging, sysModel
 
 from Basilisk import __path__
 
+# Used to tag saved figs with name of file
 fileName = os.path.basename(os.path.splitext(__file__)[0])
 
-
+# -------------------------------------------------------------------------
+# PLOTTING FUNCTIONS
+# -------------------------------------------------------------------------
 def plot_attitude_error(timeData, dataSigmaBR):
     """Plot the attitude errors."""
     fig = plt.figure(num = 1, clear = True)
@@ -46,6 +49,7 @@ def plot_rate_error(timeData, dataOmegaBR):
 
 def plot_rw_momenta(timeData, dataOmegaRw, RW, numRW):
     """Plot the RW momenta."""
+    # Total momentum norm found by projecting each wheel's momentum onto spin axis and summing
     totMomentumNorm = []
     for j in range(len(timeData)):
         totMomentum = np.array([0,0,0])
@@ -151,6 +155,14 @@ def plot_thrForce(timeDataFSW, dataThr, numTh):
     return fig
 
 
+# addRWsXML: supporter function for XML constructor function to generate RW bodies within
+#   hub body, generalized for any number of RWs
+#   INPUTS:
+#       - rwPos: list of [x, y, z] positions, one per wheel
+#       - rwAxes: list of [x, y, z] unit spin-axis vectors, one per wheel
+#       - rwFactory: simIncludeRW.rwFactory instance used to create the RW config objects
+#       - maxMomentum: maximum momentum spec [Nms]
+#       - baseIndent: initial num of indents (tabs) necessary for proper XML formatting
 def addRWsXML(rwPos: list, 
               rwAxes: list,
               rwFactory: simIncludeRW, 
@@ -159,7 +171,6 @@ def addRWsXML(rwPos: list,
 
     numRW = len(rwPos)
     pad = "\t" * baseIndent
-    varRWModel = messaging.BalancedWheels
 
     rwTags, actTags, RWs = [], [], []
 
@@ -168,20 +179,32 @@ def addRWsXML(rwPos: list,
         pos = rwPos[idx]
         rwAxis = rwAxes[idx]
 
-        rw = rwFactory.create('Honeywell_HR16', rwAxis, maxMomentum = maxMomentum, RWModel = varRWModel)
+        # Register wheel with the RW factory to get correct mass/inertia/torque properties
+        rw = rwFactory.create('Honeywell_HR16', rwAxis, maxMomentum = maxMomentum)
         RWs.append(rw)
 
+        # XML string defining RW body: single revolute joint about spin axis, inertial props
+        # taken from the factory-created wheel (Jt, Jt, Js), simple cylinder geom for visuals only
         rwTags.append(
 f"""{pad}<body name = "rw{n}Spin" pos = "{pos[0]} {pos[1]} {pos[2]}" zaxis = "{rwAxis[0]} {rwAxis[1]} {rwAxis[2]}">
 {pad}\t<joint name = "rw{n}Joint" pos = "0 0 0" axis = "0 0 1" ref = "0"/>
 {pad}\t<inertial pos = "0 0 0" mass = "{rw.mass}" diaginertia = "{rw.Jt} {rw.Jt} {rw.Js}"/>
 {pad}\t<geom name = "rw{n}Geom" type = "cylinder" size = "0.2 0.05" contype = "0" conaffinity = "0"/>
 {pad}</body>""")
+        # Torque-controlled actuator on the wheel joint, limited to the wheel's max motor torque
         actTags.append(f'\t\t<motor name = "rw{n}Act" joint = "rw{n}Joint" ctrlrange = "{-rw.u_max} {rw.u_max}" ctrllimited = "true"/>')
 
     return "\n".join(rwTags), "\n".join(actTags), RWs
 
 
+# addThrustersXML: supporter function for XML constructor function to generate thruster sites
+#   and force actuators on the hub body, generalized for any number of thrusters
+#   INPUTS:
+#       - thrustLocs: list of [x, y, z] thruster mounting positions
+#       - thrustDirs: list of [x, y, z] unit thrust-direction vectors, one per thruster
+#       - thrFactory: simIncludeThruster.thrusterFactory instance used to create the thruster config objects
+#       - maxThrust: maximum thrust force spec [N]
+#       - baseIndent: initial number of indents (tabs) necessary for proper XML formatting
 def addThrustersXML(thrustLocs: list, 
                     thrustDirs: list,
                     thrFactory: simIncludeThruster,
@@ -198,23 +221,30 @@ def addThrustersXML(thrustLocs: list,
         pos = thrustLocs[idx]
         dirVec = thrustDirs[idx]
 
+        # Register thruster with thruster factory to get correct FSW config properties
         thr = thrFactory.create('MOOG_Monarc_5', pos, dirVec, MaxThrust = maxThrust)
         THRs.append(thr)
 
+        # Site marks thruster location/orientation on hub, motor applies force along site z-axis
         thrustTags.append(f'{pad}\t<site name = "thrusterSite{n}" pos = "{pos[0]} {pos[1]} {pos[2]}" zaxis = "{dirVec[0]} {dirVec[1]} {dirVec[2]}"/>')
         actTags.append(f'{pad}<motor name = "thruster{n}" site = "thrusterSite{n}" gear = "0 0 1 0 0 0" ctrlrange = "0 5"/>')
     
     return "\n".join(thrustTags), "\n".join(actTags), THRs
 
 
+# makeMjXmlString: MuJoCo string constructor, creates MJ model of the hub carrying 4 RWs and
+#   8 ACS thrusters, hub properties specified in function
 def makeMjXmlString():
+    # Hub mass properties
     hubMass = 2500.0
     hubIxx, hubIyy, hubIzz = 1700.0, 1700.0, 1800.0
  
+    # All 4 RWs mounted at same offset point, canted along 4 different spin axes
     c = 2**-0.5
     rwPos = [[0.0, 0.0, 1.28]] * 4
     rwAxes = [[c, 0, c], [0, c, c], [-c, 0, c], [0, -c, c]]
 
+    # 8 ACS thrusters at hub corners, each aligned with a principal body axis
     a, b = 1.0, 1.28
     thrustLocs = [
         [-a, -a,  b], [ a, -a, -b], [ a, -a,  b], [ a,  a, -b],
@@ -228,6 +258,7 @@ def makeMjXmlString():
     rwFactory = simIncludeRW.rwFactory()
     thrFactory = simIncludeThruster.thrusterFactory()
 
+    # Generating RW and thruster XML chains
     rwBodies, rwActs, RWs = addRWsXML(rwPos, rwAxes, rwFactory)
     thrSites, thrActs, THRs = addThrustersXML(thrustLocs, thrustDirs, thrFactory)
  
@@ -266,6 +297,7 @@ def run(showPlots: bool = False):
     dynTaskName = "dynTask"
     simProcessName = "simProcess"
 
+    # Initializing simulation time/time-steps for dynamics/fsw task
     simulationTime = macros.min2nano(5)
     simulationTimeStepFsw = macros.sec2nano(1)
     simulationTimeStepDyn = macros.sec2nano(0.1)
@@ -276,15 +308,17 @@ def run(showPlots: bool = False):
     dynProcess.addTask(sim.CreateNewTask(dynTaskName, simulationTimeStepDyn))
     dynProcess.addTask(sim.CreateNewTask(fswTaskName, simulationTimeStepFsw))
 
+    # Constructing MJ XML string (hub + 4 RWs + 8 thrusters) and loading into MJScene
     xmlString, RWs, THRs, rwFactory, thrFactory = makeMjXmlString()
     scene = mujoco.MJScene(xmlString)
     scene.ModelTag = "mujocoScene"
-    scene.extraEoMCall = True
+    scene.extraEoMCall = True  # lets custom sys models step alongside MuJoCo's EoM evaluation
     sim.AddModelToTask(dynTaskName, scene)
 
     # -------------------------------------------------------------------------
     # 2) Retrieve spacecraft componenets
     # -------------------------------------------------------------------------
+    # Pull handles of hub/RW bodies and actuators from XML
     busBody = scene.getBody("hub")
     numRWs = len(RWs)
     numTHRs = len(THRs)
@@ -297,6 +331,7 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     # 3) Add gravity
     # -------------------------------------------------------------------------
+    # Adding N-Body gravity model into MJScene
     gravity = NBodyGravity.NBodyGravity()
     gravity.ModelTag = "gravity"
 
@@ -305,6 +340,7 @@ def run(showPlots: bool = False):
     earthPm.muBody = muEarth
     gravity.addGravitySource("earth", earthPm, isCentralBody = True)
 
+    # Gravity effects applied to hub only (RWs treated as rigidly attached, negligible mass)
     gravity.addGravityTarget("hub", busBody)
 
     scene.AddModelToDynamicsTask(gravity)
@@ -325,36 +361,40 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     # 5) Navitation and FSW
     # -------------------------------------------------------------------------
+    # Reading s/c state and publishing standard navigation output
     simpleNavObj = simpleNav.SimpleNav()
     simpleNavObj.ModelTag = "simpleNav"
     simpleNavObj.scStateInMsg.subscribeTo(busBody.getCenterOfMass().stateOutMsg)
     sim.AddModelToTask(dynTaskName, simpleNavObj)
 
+    # Fixed inertial pointing target
     inertial3DObj = inertial3D.inertial3D()
     inertial3DObj.ModelTag = "inertial3D"
     inertial3DObj.sigma_R0N = [0.0, 0.0, 0.0]
     sim.AddModelToTask(fswTaskName, inertial3DObj)
 
+    # Tracks attitude error of s/c
     attError = attTrackingError.attTrackingError()
     attError.ModelTag = "attErrorInertial3D"
     attError.attNavInMsg.subscribeTo(simpleNavObj.attOutMsg)
     attError.attRefInMsg.subscribeTo(inertial3DObj.attRefOutMsg)
     sim.AddModelToTask(fswTaskName, attError)
 
+    # MRP feedback control law computing the commanded control torque
     mrpControl = mrpFeedback.mrpFeedback()
     mrpControl.ModelTag = "mrpFeedback"
     sim.AddModelToTask(fswTaskName, mrpControl)
     decayTime = 10.0
     xi = 1.0
     I = np.diag([1700, 1700, 1800])
-    mrpControl.Ki = -1
+    mrpControl.Ki = -1  # make value negative to turn off integral feedback
     mrpControl.P = 3 * np.max(I) / decayTime
     mrpControl.K = (mrpControl.P/xi) * (mrpControl.P/xi) / np.max(I)
     mrpControl.integralLimit = 2. / mrpControl.Ki * 0.1
 
     controlAxes_B = [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
-    # add module that maps the Lr control torque into the RW motor torques
+    # Add module that maps the Lr control torque into the RW motor torques
     rwMotorTorqueObj = rwMotorTorque.rwMotorTorque()
     rwMotorTorqueObj.ModelTag = "rwMotorTorque"
     sim.AddModelToTask(fswTaskName, rwMotorTorqueObj)
@@ -365,36 +405,41 @@ def run(showPlots: bool = False):
     thrDesatControl = thrMomentumManagement.thrMomentumManagement()
     thrDesatControl.ModelTag = "thrMomentumManagement"
     sim.AddModelToTask(fswTaskName, thrDesatControl)
-    thrDesatControl.hs_min = 80   # Nms  :  maximum wheel momentum
+    thrDesatControl.hs_min = 80   # Nms : maximum wheel momentum
 
-    # setup the thruster force mapping module
+    # Setup the thruster force mapping module
     thrForceMappingObj = thrForceMapping.thrForceMapping()
     thrForceMappingObj.ModelTag = "thrForceMapping"
     sim.AddModelToTask(fswTaskName, thrForceMappingObj)
     thrForceMappingObj.controlAxes_B = controlAxes_B
     thrForceMappingObj.thrForceSign = 1
-    thrForceMappingObj.angErrThresh = 3.15    # this needs to be larger than pi (180 deg) for the module to work in the momentum dumping scenario
+    thrForceMappingObj.angErrThresh = 3.15 # This needs to be larger than pi (180 deg) for the module to work in the momentum dumping scenario
 
-    # setup the thruster momentum dumping module
+    # Setup the thruster momentum dumping module
     thrDump = thrMomentumDumping.thrMomentumDumping()
     thrDump.ModelTag = "thrDump"
     sim.AddModelToTask(fswTaskName, thrDump)
-    thrDump.maxCounterValue = 100          # number of control periods (simulationTimeStepFsw) to wait between two subsequent on-times
+    thrDump.maxCounterValue = 100 # Number of control periods (simulationTimeStepFsw) to wait between two subsequent on-times
     thrDump.thrMinFireTime = 0.02       
 
+    # FSW-facing config messages describing all 4 wheels / 8 thrusters
     fswRwParamMsg = rwFactory.getConfigMessage()   
     fswThrParamMsg = thrFactory.getConfigMessage()
 
     # -------------------------------------------------------------------------
     # 6) Distribute torques/
     # -------------------------------------------------------------------------
+    # rwMotorTorque outputs one array message; each MuJoCo RW actuator needs its own single
+    # actuator message, so RWTorqueDistributor (see below) fans the array out per wheel
     rwDistributor = RWTorqueDistributor(numRWs)
     rwDistributor.rwMotorTorqueInMsg.subscribeTo(rwMotorTorqueObj.rwMotorTorqueOutMsg)
     sim.AddModelToTask(fswTaskName, rwDistributor)
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
 
-    thrForceConverter = MuJoCoJDynamicThruster(THRs, simulationTimeStepDyn * macros.NANO2SEC)
+    # thrMomentumDumping outputs commanded on-times per thruster; MuJoCoJDynamicThruster (see below)
+    # to convert on-time commands from FSW stack to instant on-off thruster firings
+    thrForceConverter = MuJoCoDynamicThruster(THRs)
     scene.AddModelToDynamicsTask(thrForceConverter)
     thrForceConverter.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
 
@@ -404,6 +449,7 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     # 6) Message Linking
     # -------------------------------------------------------------------------
+    # Inertia tensor passed into config message, vehicle config created
     vehicleConfigOut = messaging.VehicleConfigMsgPayload(ISCPntB_B = [1700,0,0, 0,1700,0, 0,0,1800])
     vcMsg = messaging.VehicleConfigMsg().write(vehicleConfigOut)
     mrpControl.vehConfigInMsg.subscribeTo(vcMsg)
@@ -411,6 +457,8 @@ def run(showPlots: bool = False):
     mrpControl.guidInMsg.subscribeTo(attError.attGuidOutMsg)
     mrpControl.rwParamsInMsg.subscribeTo(fswRwParamMsg)
 
+    # RWSpeedCombiner (see below) gathers individual per-joint wheel speeds from MuJoCo,
+    # republishes them as a single RWSpeedMsg
     speedCombiner = RWSpeedCombiner(RWJoints)
     sim.AddModelToTask(fswTaskName, speedCombiner, 100)
     mrpControl.rwSpeedsInMsg.subscribeTo(speedCombiner.speedOutMsg)
@@ -454,11 +502,13 @@ def run(showPlots: bool = False):
     onTimeLog = thrDump.thrusterOnTimeOutMsg.recorder(samplingTime)
     sim.AddModelToTask(dynTaskName, onTimeLog)
 
+    # Wheel speeds live as individual MuJoCo joint states, so log each separately and column-stack later for plotting
     rwSpeedLogs = []
     for i in range(numRWs):
         rwSpeedLogs.append(RWJoints[i].stateDotOutMsg.recorder(samplingTime))
         sim.AddModelToTask(dynTaskName, rwSpeedLogs[i])
 
+    # Delivered force at each thruster actuator, logged individually
     thrForceLogs = []
     for i in range(numTHRs):
         thrForceLogs.append(THRActuators[i].actuatorInMsg.recorder(samplingTime))
@@ -469,18 +519,22 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     sim.InitializeSimulation()
 
+    # Setting initial conditions
     busFree = busBody.getFreeJoint()
     busBody.setPosition(rN)
     busFree.setVelocity(vN)
 
+    # Initial wheel spin rates, chosen so the wheels start above the 80 Nms desat threshold
     initialOmegas = [4000., 2000., 3500., 0.]
     for i in range(numRWs):
         omega_radps = initialOmegas[i] * macros.RPM
         RWJoints[i].setVelocity(omega_radps) 
 
+    # Run first 10s before resetting thrDesatControl, since it cannot dump momentum at t = 0
     sim.ConfigureStopTime(macros.sec2nano(10.0))
     sim.ExecuteSimulation()
 
+    # Reset thrDesat module after 10 seconds because momentum cannot be dumped at t = 0
     thrDesatControl.Reset(macros.sec2nano(10.0))
 
     sim.ConfigureStopTime(simulationTime)
@@ -491,11 +545,13 @@ def run(showPlots: bool = False):
     # -------------------------------------------------------------------------
     dataSigmaBR = attErrorLog.sigma_BR
     dataOmegaBR = attErrorLog.omega_BR_B
+    # Column-stack per-wheel speed logs into a single (numSamples x numRWs) array
     dataOmegaRW = np.column_stack([np.squeeze(rwSpeedLogs[i].state) for i in range(numRWs)])
     dataDH = deltaHLog.torqueRequestBody
     dataMap = thrMapLog.thrForce
     dataOnTime = onTimeLog.OnTimeRequest
 
+    # Gather delivered thruster force logs into list of arrays, one per thruster
     dataThr = []
     for i in range(numTHRs):
         dataThr.append(thrForceLogs[i].input)
@@ -504,6 +560,7 @@ def run(showPlots: bool = False):
 
     timeData = rwMotorLog.times() * macros.NANO2SEC
 
+    # Generating plots
     plt.close("all")
     figureList = {}
     figureList[fileName + "_attError"] = plot_attitude_error(timeData, dataSigmaBR)
@@ -521,15 +578,22 @@ def run(showPlots: bool = False):
     return figureList
 
 
+# -------------------------------------------------------------------------
+# RWTorqueDistributor: custom sys model to fan a single array motor-torque message out into
+#   one single-actuator message per reaction wheel
+#   INPUTS:
+#       - numRW: number of reaction wheels to distribute torque commands to
+# -------------------------------------------------------------------------
 class RWTorqueDistributor(sysModel.SysModel):
     def __init__(self, numRW):
         super().__init__()
         self.ModelTag = "rwTorqueDistributor"
         self.numRW = numRW
-        self.rwMotorTorqueInMsg = messaging.ArrayMotorTorqueMsgReader()
-        self.torqueOutMsgs = [messaging.SingleActuatorMsg() for _ in range(numRW)]
+        self.rwMotorTorqueInMsg = messaging.ArrayMotorTorqueMsgReader()  # combined torque command
+        self.torqueOutMsgs = [messaging.SingleActuatorMsg() for _ in range(numRW)]  # per-wheel outputs
 
     def UpdateState(self, CurrentSimNanos):
+        """Splits the array torque command into individual per-wheel actuator messages"""
         if self.rwMotorTorqueInMsg.isLinked():
             payload = self.rwMotorTorqueInMsg()
             for i in range(self.numRW):
@@ -537,237 +601,86 @@ class RWTorqueDistributor(sysModel.SysModel):
                 out.input = payload.motorTorque[i]
                 self.torqueOutMsgs[i].write(out, CurrentSimNanos, self.moduleID)
 
+
+# -------------------------------------------------------------------------
+# RWSpeedCombiner: custom sys model to combine per-joint MuJoCo wheel speeds into a single
+#   RWSpeedMsg expected by the FSW momentum-management chain
+#   INPUTS:
+#       - joints: list of MuJoCo scalar joints, one per reaction wheel
+# -------------------------------------------------------------------------
 class RWSpeedCombiner(sysModel.SysModel):
     def __init__(self, joints):
         super().__init__()
         self.ModelTag = "rwSpeedCombiner"
         self.joints = joints
-        self.speedOutMsg = messaging.RWSpeedMsg()
+        self.speedOutMsg = messaging.RWSpeedMsg()  # combined wheel speed output
 
     def UpdateState(self, CurrentSimNanos):
+        """Reads each wheel joint's current spin rate and republishes as one combined message"""
         speeds = [joint.stateDotOutMsg.read().state for joint in self.joints]
         payload = messaging.RWSpeedMsgPayload()
         payload.wheelSpeeds = speeds
         self.speedOutMsg.write(payload, CurrentSimNanos, self.moduleID)
 
 
-
-# -------------------------------------------------------------------------
-# -------------------------------------------------------------------------
-# ------------------- THRUSTER DYNAMIC EFFECTOR MUJOCO --------------------
-# -------------------------------------------------------------------------
-# -------------------------------------------------------------------------
-
-class THRRampPoint:
-    def __init__(self, timeDelta: float, thrustFactor: float, ispFactor: float = 1.0):
-        self.TimeDelta = timeDelta
-        self.ThrustFactor = thrustFactor
-        self.IspFactor = ispFactor
-
+# Helper class to handle thruster firing
 class THROpState:
+    """Mutable per-thruster firing state"""
     def __init__(self):
-        self.ThrustOnCmd = 0.0
-        self.ThrustFactor = 0.0
-        self.IspFactor = 0.0
-        self.ThrusterStartTime = 0.0
-        self.PreviousIterTime = 0.0
-        self.ThrustOnRampTime = 0.0
-        self.ThrustOffRampTime = 0.0
-        self.ThrustOnSteadyTime = 0.0
-        self.totalOnTime = 0.0
-
-def extractConfig(thr, index):
-    def get(name, default):
-        val = getattr(thr, name, None)
-        if val is None:
-            print(f"thruster {index}: {name} not found on config obj")
-            return default
-        return val
-
-    maxThrust = get("MaxThrust", 1.0)
-    minOnTime = get("MinOnTime", 0.0)
-    steadyIsp = get("steadyIsp", 226.0)
-    maxSwirlTorque = get("MaxSwirlTorque", 0.0)
-
-    onRampRaw = getattr(thr, "ThrusterOnRamp", None) or []
-    offRampRaw = getattr(thr, "ThrusterOffRamp", None) or []
-
-    onRamp = [THRRampPoint(p.TimeDelta, p.ThrustFactor, getattr(p, "IspFactor", 1.0)) for p in onRampRaw]
-    offRamp = [THRRampPoint(p.TimeDelta, p.ThrustFactor, getattr(p, "IspFactor", 1.0)) for p in offRampRaw]
-
-    return dict(
-        MaxThrust = maxThrust,
-        MinOnTime = minOnTime,
-        steadyIsp = steadyIsp,
-        MaxSwirlTorque = maxSwirlTorque,
-        ThrusterOnRamp = onRamp,
-        ThrusterOffRamp = offRamp,
-    )
+        self.ThrustOnCmd = 0.0 # commanded on-time [s] for current firing
+        self.ThrusterStartTime = 0.0 # sim time [s] the current firing began
 
 
-class MuJoCoJDynamicThruster(sysModel.SysModel):
-    def __init__(self, thrConfigObjs, dynTimeStep: float):
+# -------------------------------------------------------------------------
+# MuJoCoDynamicThruster: custom sys model to handle on-time commands provided by
+#   FSW to instant on-off firing necessary for actuator firing. This model is a 
+#   primitive version of thrusterDynamicEffector, which also includes on/off times
+#   INPUTS:
+#       - thrConfigObjs: list of configuration objects assigned to each thruster
+# -------------------------------------------------------------------------
+class MuJoCoDynamicThruster(sysModel.SysModel):
+    def __init__(self, thrConfigObjs):
         super().__init__()
         self.ModelTag = "MuJoCoDynamicThruster"
 
         self.numTHR = len(thrConfigObjs)
-        self.cfg = [extractConfig(t, i) for i, t in enumerate(thrConfigObjs)]
+        self.maxThrust = [t.MaxThrust for t in thrConfigObjs]
         self.ops = [THROpState() for _ in range(self.numTHR)]
-
-        self.dt = dynTimeStep
 
         self.onTimeInMsg = messaging.THRArrayOnTimeCmdMsgReader()
         self.thrusterForceOutMsgs = [messaging.SingleActuatorMsg() for _ in range(self.numTHR)]
 
-        self.newThrustCmds = [0.0] * self.numTHR
-        self.prevCommandTime = None
-        self.prevCallTime = None
-
-    def ReadInputs(self):
-        if not self.onTimeInMsg.isLinked():
-            return False
-        payload = self.onTimeInMsg()
-        writtenTime = self.onTimeInMsg.timeWritten()
-        dataGood = self.onTimeInMsg.isWritten()
-        if not dataGood or writtenTime == self.prevCommandTime:
-            return False
-        self.prevCommandTime = writtenTime
-        for i in range(self.numTHR):
-            self.newThrustCmds[i] = payload.OnTimeRequest[i]
-        return True
-
-    def configureThrustRequests(self, currentTime):
-        for i in range(self.numTHR):
-            cmd = self.newThrustCmds[i]
-            op = self.ops[i]
-            minOnTime = self.cfg[i]["MinOnTime"]
-
-            if cmd >= minOnTime:
-                op.ThrustOnCmd = cmd
-            else:
-                op.ThrustOnCmd = cmd if op.ThrustFactor > 0.0 else 0.0
-
-            op.ThrusterStartTime = currentTime
-            op.PreviousIterTime = currentTime
-            op.ThrustOnRampTime = 0.0
-            op.ThrustOnSteadyTime = 0.0
-            op.ThrustOffRampTime = 0.0
-
-            self.newThrustCmds[i] = 0.0
-
-    @staticmethod
-    def thrFactorToTime(op, ramp):
-        last = ramp[-1]
-        rampTime = last.TimeDelta
-        diff = last.ThrustFactor - op.ThrustFactor
-        rampDirection = 1.0 if diff >= 0 else -1.0
-
-        prevValidThrFactor = 0.0 if rampDirection > 0 else 1.0
-        prevValidDelta = 0.0
-
-        for pt in ramp:
-            pointCheck = (pt.ThrustFactor <= op.ThrustFactor) if rampDirection > 0 else (pt.ThrustFactor >= op.ThrustFactor)
-            if pointCheck:
-                prevValidThrFactor = pt.ThrustFactor
-                prevValidDelta = pt.TimeDelta
-                continue
-            denom = (pt.ThrustFactor - prevValidThrFactor)
-            if denom == 0.0:
-                rampTime = prevValidDelta
-            else:
-                rampTime = (pt.TimeDelta - prevValidDelta) / denom * (op.ThrustFactor - prevValidThrFactor) + prevValidDelta
-            rampTime = max(rampTime, 0.0)
-            break
-
-        return rampTime
-
-    def computeThrusterFire(self, i, currentTime):
-        op = self.ops[i]
-        onRamp = self.cfg[i]["ThrusterOnRamp"]
-
-        if op.ThrustOnRampTime == 0.0 and len(onRamp) > 0:
-            op.ThrustOnRampTime = self.thrFactorToTime(op, onRamp)
-
-        localOnRamp = max((currentTime - op.PreviousIterTime) + op.ThrustOnRampTime, 0.0)
-
-        prevTHR, prevIsp, prevDelta = 0.0, 0.0, 0.0
-        for pt in onRamp:
-            if localOnRamp < pt.TimeDelta:
-                denomT = (pt.TimeDelta - prevDelta)
-                op.ThrustFactor = (pt.ThrustFactor - prevTHR) / denomT * (localOnRamp - prevDelta) + prevTHR
-                op.IspFactor = (pt.IspFactor - prevIsp) / denomT * (localOnRamp - prevDelta) + prevIsp
-                op.ThrustOnRampTime = localOnRamp
-                op.totalOnTime += currentTime - op.PreviousIterTime
-                op.PreviousIterTime = currentTime
-                return 
-            prevTHR, prevIsp, prevDelta = pt.ThrustFactor, pt.IspFactor, pt.TimeDelta
-
-        op.ThrustOnSteadyTime += currentTime - op.PreviousIterTime
-        op.totalOnTime += currentTime - op.PreviousIterTime
-        op.PreviousIterTime = currentTime
-        op.ThrustFactor = 1.0
-        op.IspFactor = 1.0
-        op.ThrustOffRampTime = 0.0
-
-    def computeThrusterShut(self, i, currentTime):
-        op = self.ops[i]
-        offRamp = self.cfg[i]["ThrusterOffRamp"]
-
-        if op.ThrustOffRampTime == 0.0 and len(offRamp) > 0:
-            op.ThrustOffRampTime = self.thrFactorToTime(op, offRamp)
-
-        localOffRamp = max((currentTime - op.PreviousIterTime) + op.ThrustOffRampTime, 0.0)
-
-        prevTHR, prevIsp, prevDelta = 1.0, 1.0, 0.0
-        for pt in offRamp:
-            if localOffRamp < pt.TimeDelta:
-                denomT = (pt.TimeDelta - prevDelta)
-                op.ThrustFactor = (pt.ThrustFactor - prevTHR) / denomT * (localOffRamp - prevDelta) + prevTHR
-                op.IspFactor = (pt.IspFactor - prevIsp) / denomT * (localOffRamp - prevDelta) + prevIsp
-                op.ThrustOffRampTime = localOffRamp
-                op.PreviousIterTime = currentTime
-                return
-            prevTHR, prevIsp, prevDelta = pt.ThrustFactor, pt.IspFactor, pt.TimeDelta
-
-        op.ThrustFactor = 0.0
-        op.IspFactor = 0.0
-        op.ThrustOnRampTime = 0.0
+        self.prevCommandTime = None  # detects a newly written on-time message
 
     def UpdateState(self, CurrentSimNanos):
         currentTime = CurrentSimNanos * macros.NANO2SEC
 
-        if self.ReadInputs():
-            self.configureThrustRequests(currentTime)
+        # Latch a newly written on-time command
+        if self.onTimeInMsg.isLinked() and self.onTimeInMsg.isWritten():
+            writtenTime = self.onTimeInMsg.timeWritten()
+            if writtenTime != self.prevCommandTime:
+                self.prevCommandTime = writtenTime
+                payload = self.onTimeInMsg()
+                for i in range(self.numTHR):
+                    self.ops[i].ThrustOnCmd = payload.OnTimeRequest[i]
+                    self.ops[i].ThrusterStartTime = currentTime
 
-        if self.prevCallTime is None:
-            dt = self.dt
-        else:
-            dt = currentTime - self.prevCallTime
-        self.prevCallTime = currentTime
-
+        # Instant on/off: full thrust while within the commanded window, else zero
         for i in range(self.numTHR):
             op = self.ops[i]
-            stillFiring = (op.ThrustOnCmd + op.ThrusterStartTime - currentTime) >= -dt * 10E-10 and op.ThrustOnCmd > 0.0
-
-            if stillFiring:
-                self.computeThrusterFire(i, currentTime)
-            elif op.ThrustFactor > 0.0:
-                self.computeThrusterShut(i, currentTime)
-
-            force = self.cfg[i]["MaxThrust"] * op.ThrustFactor
+            stillFiring = op.ThrustOnCmd > 0.0 and (currentTime - op.ThrusterStartTime) < op.ThrustOnCmd
+            force = self.maxThrust[i] if stillFiring else 0.0
 
             payload = messaging.SingleActuatorMsgPayload()
             payload.input = force
             self.thrusterForceOutMsgs[i].write(payload, CurrentSimNanos, self.moduleID)
 
 
-
 if __name__ == "__main__":
     # --- XML TESTING ---
-    
     xmlString, *_ = makeMjXmlString()
- 
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "sat_momentumDump.xml"), "w") as f:
+    xmlPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sat_momentumDump.xml")
+    with open(xmlPath, "w") as f:
         f.write(xmlString)
 
-    run(True)
+    run(showPlots = True)

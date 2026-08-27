@@ -12,7 +12,7 @@ from Basilisk import __path__
 # Used to tag saved figs with name of file
 fileName = os.path.basename(os.path.splitext(__file__)[0])
 
-#--------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 # PLOTTING FUNCTIONS
 # -------------------------------------------------------------------------
 def plotBendingAngles(timeAxis: np.ndarray, theta: list, numberOfSegments: int) -> plt.Figure:

@@ -437,9 +437,12 @@ def run(showPlots: bool = False):
     for i in range(numRWs):
         RWActuators[i].actuatorInMsg.subscribeTo(rwDistributor.torqueOutMsgs[i])
 
-    # thrMomentumDumping outputs commanded on-times per thruster; MuJoCoJDynamicThruster (see below)
-    # to convert on-time commands from FSW stack to instant on-off thruster firings
-    thrForceConverter = MuJoCoDynamicThruster(THRs)
+    thrForceConverter = thrOnTimeToForce.ThrOnTimeToForce()
+    thrForceConverter.ModelTag = "thrOnTimeToForce"
+    for _ in range(numTHRs):
+        thrForceConverter.addThruster()
+    thrForceConverter.setThrMag([thr.MaxThrust for thr in THRs])   # must match addThruster() order
+
     scene.AddModelToDynamicsTask(thrForceConverter)
     thrForceConverter.onTimeInMsg.subscribeTo(thrDump.thrusterOnTimeOutMsg)
 
@@ -621,59 +624,6 @@ class RWSpeedCombiner(sysModel.SysModel):
         payload = messaging.RWSpeedMsgPayload()
         payload.wheelSpeeds = speeds
         self.speedOutMsg.write(payload, CurrentSimNanos, self.moduleID)
-
-
-# Helper class to handle thruster firing
-class THROpState:
-    """Mutable per-thruster firing state"""
-    def __init__(self):
-        self.ThrustOnCmd = 0.0 # commanded on-time [s] for current firing
-        self.ThrusterStartTime = 0.0 # sim time [s] the current firing began
-
-
-# -------------------------------------------------------------------------
-# MuJoCoDynamicThruster: custom sys model to handle on-time commands provided by
-#   FSW to instant on-off firing necessary for actuator firing. This model is a 
-#   primitive version of thrusterDynamicEffector, which also includes on/off times
-#   INPUTS:
-#       - thrConfigObjs: list of configuration objects assigned to each thruster
-# -------------------------------------------------------------------------
-class MuJoCoDynamicThruster(sysModel.SysModel):
-    def __init__(self, thrConfigObjs):
-        super().__init__()
-        self.ModelTag = "MuJoCoDynamicThruster"
-
-        self.numTHR = len(thrConfigObjs)
-        self.maxThrust = [t.MaxThrust for t in thrConfigObjs]
-        self.ops = [THROpState() for _ in range(self.numTHR)]
-
-        self.onTimeInMsg = messaging.THRArrayOnTimeCmdMsgReader()
-        self.thrusterForceOutMsgs = [messaging.SingleActuatorMsg() for _ in range(self.numTHR)]
-
-        self.prevCommandTime = None  # detects a newly written on-time message
-
-    def UpdateState(self, CurrentSimNanos):
-        currentTime = CurrentSimNanos * macros.NANO2SEC
-
-        # Latch a newly written on-time command
-        if self.onTimeInMsg.isLinked() and self.onTimeInMsg.isWritten():
-            writtenTime = self.onTimeInMsg.timeWritten()
-            if writtenTime != self.prevCommandTime:
-                self.prevCommandTime = writtenTime
-                payload = self.onTimeInMsg()
-                for i in range(self.numTHR):
-                    self.ops[i].ThrustOnCmd = payload.OnTimeRequest[i]
-                    self.ops[i].ThrusterStartTime = currentTime
-
-        # Instant on/off: full thrust while within the commanded window, else zero
-        for i in range(self.numTHR):
-            op = self.ops[i]
-            stillFiring = op.ThrustOnCmd > 0.0 and (currentTime - op.ThrusterStartTime) < op.ThrustOnCmd
-            force = self.maxThrust[i] if stillFiring else 0.0
-
-            payload = messaging.SingleActuatorMsgPayload()
-            payload.input = force
-            self.thrusterForceOutMsgs[i].write(payload, CurrentSimNanos, self.moduleID)
 
 
 if __name__ == "__main__":

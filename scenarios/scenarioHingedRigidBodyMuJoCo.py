@@ -1,3 +1,61 @@
+#
+#  ISC License
+#
+#  Copyright (c) 2026, Autonomous Vehicle Systems Lab, University of Colorado at Boulder
+#
+#  Permission to use, copy, modify, and/or distribute this software for any
+#  purpose with or without fee is hereby granted, provided that the above
+#  copyright notice and this permission notice appear in all copies.
+#
+#  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+#  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+#  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+#  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+#  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+#  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+
+r"""
+It's recommended to review the following scenario(s) first (and any
+recommended scenario(s) that they may have):
+
+#. ``examples/scenarioHingedRigidBody.py``
+#. ``examples/mujoco/scenarioReactionWheel.py``
+
+This script demonstrates how to run the classic Basilisk
+``scenarioHingedRigidBody.py`` example using MuJoCo dynamics via
+:ref:`MJScene<MJScene>` instead of the traditional hub-centric Basilisk
+:ref:`spacecraft` dynamics.
+
+The multi-body system is created programmatically as a MuJoCo XML string.
+It consists of a free-floating spacecraft bus ("hub") with two solar panel
+rigid bodies ("panel1", "panel2") attached via hinge joints ("hinge1",
+"hinge2"), giving the system 8 total degrees of freedom (3 translational,
+3 rotational, and 2 panel hinge DOFs).
+
+Two small custom system models are added directly to the MuJoCo dynamics task:
+#. ``JointSpringDamper`` computes a torsional spring-damper restoring
+   torque for a hinge joint from its angle and angular rate, and writes
+   the result as a ``SingleActuatorMsg`` command. One instance is
+   attached to each panel hinge to emulate panel stiffness and damping.
+#. ``InertialForceToSiteActuator`` converts a fixed inertial-frame thrust
+   force into a body-frame force at the hub's thruster site, applying it
+   only during a specified burn time window.
+
+Earth gravity is configured using :ref:`NBodyGravity<NBodyGravity>` with a
+:ref:`pointMassGravityModel<pointMassGravityModel>` as the central body.
+Gravity targets are registered manually for the hub and both panel bodies.
+
+The spacecraft is placed on a near-circular LEO orbit. The simulation runs
+for a short coast phase followed by a finite-duration translational burn,
+during which the panels respond dynamically to the resulting body motion
+through their spring-damper hinges.
+
+Inertial position, orbital radius, and the two panel hinge angular
+displacements are plotted at the end.
+"""
+
 from typing import Tuple
 import os
 

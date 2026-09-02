@@ -1,3 +1,87 @@
+#
+#  ISC License
+#
+#  Copyright (c) 2026, Autonomous Vehicle Systems Lab, University of Colorado at Boulder
+#
+#  Permission to use, copy, modify, and/or distribute this software for any
+#  purpose with or without fee is hereby granted, provided that the above
+#  copyright notice and this permission notice appear in all copies.
+#
+#  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+#  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+#  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+#  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+#  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+#  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+
+r"""
+It's recommended to review the following scenario(s) first (and any
+recommended scenario(s) that they may have):
+
+#. ``examples/scenarioMomentumDumping.py``
+#. ``examples/mujoco/scenarioAttitudeFeedbackRW.py``
+
+This script demonstrates how to run a reaction wheel momentum dumping
+scenario, stranslated from the classic Basilisk ``scenarioMomentumDumping.py``
+example, using MuJoCo dynamics via :ref:`MJScene<MJScene>` instead of the
+traditional hub-centric Basilisk :ref:`spacecraft` dynamics.
+
+The multi-body system is created programmatically as a MuJoCo XML string.
+It consists of a free-floating spacecraft bus ("hub") carrying 4 reaction
+wheel rigid bodies ("rw1Spin" ... "rw4Spin") mounted at canted spin
+axes, and 8 thrusters attached directly to the hub via fixed sites.
+Each wheel spin DOF is driven by a MuJoCo single-input torque actuator, and
+each thruster site has a MuJoCo motor actuator that applies force along the
+site's z-axis.
+
+A standard Basilisk FSW stack is used to point the hub at a fixed inertial
+attitude, offload control effort onto the reaction wheels, and dump excess
+wheel momentum with the ACS thrusters once it exceeds a threshold:
+
+#. ``inertial3D`` generates a fixed inertial attitude reference.
+#. ``attTrackingError`` computes the attitude and rate tracking errors.
+#. ``mrpFeedback`` computes the commanded body control torque.
+#. ``rwMotorTorque`` maps the commanded body torque into individual wheel
+   motor torque commands.
+#. ``thrMomentumManagement`` monitors the total wheel momentum and computes
+   a delta-H command once it exceeds a specified maximum.
+#. ``thrForceMapping`` maps the desaturation delta-H command into individual
+   thruster force commands.
+#. ``thrMomentumDumping`` converts the thruster force commands into
+   discrete thruster on-time pulses.
+
+   ** See ``scenarioMomentumDumping.py`` for more info on this.
+
+Several small adapter modules bridge Basilisk messaging to MuJoCo objects:
+
+#. ``RWTorqueDistributor`` splits the single ``ArrayMotorTorqueMsg`` from
+   ``rwMotorTorque`` into individual ``SingleActuatorMsg`` commands, one per
+   MuJoCo wheel actuator.
+#. ``RWSpeedCombiner`` reads each wheel's spin rate directly from its MuJoCo
+   joint state and republishes them as a single ``RWSpeedMsg`` for the
+   momentum-management chain.
+#. ``thrOnTimeToForce`` converts the thruster on-time pulse commands from
+   ``thrMomentumDumping`` into instantaneous force commands for each MuJoCo
+   thruster actuator.
+
+Earth gravity is configured using :ref:`NBodyGravity<NBodyGravity>` with a
+:ref:`pointMassGravityModel<pointMassGravityModel>` as the central body,
+applied to the hub only.
+
+The spacecraft is placed on a near-circular LEO orbit, and the wheels are
+initialized above the momentum-dumping threshold. The simulation briefly
+coasts before the momentum management module is reset (since desaturation
+cannot begin exactly at t = 0), then runs for 5 minutes while the wheels
+provide attitude control and the thrusters intermittently fire to dump
+excess wheel momentum.
+
+Attitude error, rate tracking error, individual and total wheel momenta,
+dumped momentum, wheel speeds, thruster impulse requests, thruster on-time
+requests, and delivered thruster forces are plotted at the end.
+"""
+
 import os
 import matplotlib.pyplot as plt
 import numpy as np

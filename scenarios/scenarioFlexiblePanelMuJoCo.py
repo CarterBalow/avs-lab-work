@@ -1,3 +1,83 @@
+#
+#  ISC License
+#
+#  Copyright (c) 2026, Autonomous Vehicle Systems Lab, University of Colorado at Boulder
+#
+#  Permission to use, copy, modify, and/or distribute this software for any
+#  purpose with or without fee is hereby granted, provided that the above
+#  copyright notice and this permission notice appear in all copies.
+#
+#  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+#  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+#  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+#  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+#  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+#  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+#  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+
+r"""
+It's recommended to review the following scenario(s) first (and any
+recommended scenario(s) that they may have):
+
+#. ``examples/scenarioFlexiblePanel.py``
+#. ``examples/mujoco/scenarioHingedRigidBody.py``
+#. ``examples/mujoco/scenarioAttitudeFeedbackRW.py``
+
+This script demonstrates how to model a flexible, multi-segment solar panel
+using MuJoCo dynamics via :ref:`MJScene<MJScene>` instead of the traditional
+hub-centric Basilisk :ref:`spacecraft` dynamics. This scenario is a translation
+of the classic Basilisk ``scenarioFlexiblePanel.py`` example.
+
+The multi-body system is created programmatically as a MuJoCo XML string.
+It consists of a free-floating spacecraft bus ("hub") with a single flexible
+panel discretized into ``numberOfSegments`` rigid sub-panel bodies
+("subPanel1", "subPanel2", ...), connected end-to-end. Each sub-panel is
+connected to its neighbor by two identically-located hinge joints: a "bend" joint
+(bending DOF) and a "twist" joint (torsional DOF), so that the
+panel's continuous flexibility is approximated by a discretized series of
+rigid links.
+
+A torsional spring-damper torque is applied at every bend and twist joint to
+emulate the panel's structural stiffness and damping:
+
+#. ``JointSpringDamper`` computes a restoring torque from a joint's angle and
+   angular rate about a reference equilibrium angle, and writes the result as
+   a ``SingleActuatorMsg`` command. One instance is attached to each bend and
+   twist joint, using separate bending and torsional stiffness/damping
+   coefficients.
+
+A standard Basilisk FSW stack is used to point the hub at a fixed inertial
+attitude while the flexible panel dynamically responds to the resulting
+motion:
+
+#. ``simpleNav`` provides the spacecraft's navigation attitude solution.
+#. ``inertial3D`` generates a fixed inertial attitude reference.
+#. ``attTrackingError`` computes the attitude and rate tracking errors.
+#. ``mrpFeedback`` computes the commanded body torque, using an inertia
+   tensor for the hub plus panel computed via the parallel axis theorem.
+
+A small adapter module bridges the FSW torque command to the MuJoCo torque
+actuator:
+
+#. ``CmdTorqueToSiteActuator`` relays the commanded body-frame torque
+   directly as a ``TorqueAtSiteMsg`` (site and body frames are coincident),
+   consumed by a torque actuator at the hub site.
+
+Earth gravity is configured using :ref:`NBodyGravity<NBodyGravity>` with a
+:ref:`pointMassGravityModel<pointMassGravityModel>` as the central body.
+Gravity targets are registered manually for the hub and every sub-panel body.
+
+The spacecraft is placed on an elliptical orbit and released from rest (all
+bend/twist angles initialized to zero) while the attitude controller
+maneuvers the hub to the commanded reference orientation. The simulation
+runs for 10 minutes.
+
+Bending angles, torsional angles, and their rates are plotted for every
+sub-panel segment, along with the attitude error and attitude error rate
+from the FSW control loop.
+"""
+
 import os
 import matplotlib.pyplot as plt
 import numpy as np

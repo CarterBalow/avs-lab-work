@@ -45,7 +45,6 @@ CSV_HEADERS = [
 ]
 
 # Experiment parameters
-SAMPLE_DURATION = 10.0 # s
 READING_FREQUENCY = 10000 # Hz
 PRINTING_FREQUENCY = 1000 # Hz
 
@@ -56,7 +55,6 @@ CONTACT_FORCE_THRESHOLD = 10 # N **KEEP ABOVE NOISE FLOOR
 MAX_APPROACH_TIME = 60.0 # s
 
 # Adhesion measurement parameters
-RETRACT_START_TIME = 2.0 # s
 RETRACT_DISTANCE = 5 # mm
 PAD_ACTIVATION_TIME = 60 # s
 
@@ -74,7 +72,7 @@ else:
     voltage = args.voltage
 
 # Timestamp for unique trials with similar v
-run_id = f"{voltage:g}kV_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+run_id = f"Exp2_{voltage:g}kV_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 #----------------------------------------------------------------------
 #                       THERMAL FAULT RECOVERY
@@ -195,29 +193,14 @@ def run_trial(run_id,
         print("Stop requested — skipping recording.")
         return None
 
-    # --- PAD ACTIVATION ---
-    print(f"Waiting {pad_activation_time:.1f}s for adhesion to stabilize...")
-    activation_start = time.perf_counter()
-    last_activation_print = activation_start
-    while time.perf_counter() - activation_start < pad_activation_time and not stop_flag:
-        now = time.perf_counter()
-        if now - last_activation_print >= 5.0:
-            remaining = pad_activation_time - (now - activation_start)
-            print(f"  ...{remaining:.0f}s remaining")
-            last_activation_print = now
-        time.sleep(0.05)
-
-    if stop_flag:
-        print("Stop requested — skipping recording.")
-        return None
-
     retract_direction = -APPROACH_DIRECTION
     retract_duration = RETRACT_DISTANCE / (APPROACH_SPEED) # Time instead of distance in case of stage error
+    total_duration = pad_activation_time + retract_duration + 1.0  # activation hold + retract + small buffer
 
-    # --- RECORDING ---
+    # --- RECORDING (starts immediately on contact, runs through activation + retract) ---
     print(f"\n=== Run {run_id} (voltage = {voltage} kV) ===")
     print(f"Logging data to: {csv_path}")
-    print(f"Recording for {SAMPLE_DURATION:.1f}s")
+    print(f"Recording for {total_duration:.1f}s (pad activation + retract)")
 
     start_time = time.perf_counter()
     last_print_time = start_time
@@ -236,11 +219,11 @@ def run_trial(run_id,
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(CSV_HEADERS)
 
-        while time.perf_counter() - start_time < SAMPLE_DURATION and not stop_flag:
+        while time.perf_counter() - start_time < total_duration and not stop_flag:
             elapsed = time.perf_counter() - start_time
 
             # Retract after the specified wait time
-            if not retract_started and not thermal_fault_during_recording and elapsed >= RETRACT_START_TIME:
+            if not retract_started and not thermal_fault_during_recording and elapsed >= pad_activation_time:
                 print(f"t={elapsed:.2f}s — starting retract...")
                 axisX.startScan(retract_direction)
                 retract_started = True

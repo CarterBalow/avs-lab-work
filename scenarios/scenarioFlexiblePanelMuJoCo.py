@@ -36,7 +36,8 @@ panel discretized into ``numberOfSegments`` rigid sub-panel bodies
 connected to its neighbor by two identically-located hinge joints: a "bend" joint
 (bending DOF) and a "twist" joint (torsional DOF), so that the
 panel's continuous flexibility is approximated by a discretized series of
-rigid links.
+rigid links. As such, this system has 6 + 2 * ``numberOfSegments`` DOFs
+(3 translational, 3 rotational, 2 DOFs per discretized panel)
 
 A torsional spring-damper torque is applied at every bend and twist joint to
 emulate the panel's structural stiffness and damping:

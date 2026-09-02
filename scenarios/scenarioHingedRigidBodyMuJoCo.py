@@ -35,6 +35,7 @@ rigid bodies ("panel1", "panel2") attached via hinge joints ("hinge1",
 3 rotational, and 2 panel hinge DOFs).
 
 Two small custom system models are added directly to the MuJoCo dynamics task:
+
 #. ``JointSpringDamper`` computes a torsional spring-damper restoring
    torque for a hinge joint from its angle and angular rate, and writes
    the result as a ``SingleActuatorMsg`` command. One instance is

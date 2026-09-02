@@ -47,7 +47,7 @@ CSV_HEADERS = [
 # Experiment parameters
 SAMPLE_DURATION = 10.0 # s
 READING_FREQUENCY = 10000 # Hz
-PRINTING_FREQUENCY = 1000 # Hz
+PRINTING_FREQUENCY = 15 # Hz
 
 # Preload/contact-detection parameters
 APPROACH_DIRECTION = 1 # direction of motion (1 or -1)
@@ -214,6 +214,13 @@ def run_trial(run_id,
     retract_direction = -APPROACH_DIRECTION
     retract_duration = RETRACT_DISTANCE / (APPROACH_SPEED) # Time instead of distance in case of stage error
 
+    countdown_thresholds = {
+        3: RETRACT_START_TIME - 3.0,
+        2: RETRACT_START_TIME - 2.0,
+        1: RETRACT_START_TIME - 1.0,
+    }
+    countdown_printed = set()
+
     # --- RECORDING ---
     print(f"\n=== Run {run_id} (voltage = {voltage} kV) ===")
     print(f"Logging data to: {csv_path}")
@@ -240,11 +247,17 @@ def run_trial(run_id,
             elapsed = time.perf_counter() - start_time
 
             # Retract after the specified wait time
-            if not retract_started and not thermal_fault_during_recording and elapsed >= RETRACT_START_TIME:
-                print(f"t={elapsed:.2f}s — starting retract...")
-                axisX.startScan(retract_direction)
-                retract_started = True
-                retract_start_clock = time.perf_counter()
+            if not retract_started and not thermal_fault_during_recording:
+                for count, t in countdown_thresholds.items():
+                    if count not in countdown_printed and elapsed >= t:
+                        print(f"\nRetracting in {count}...")
+                        countdown_printed.add(count)
+
+                if elapsed >= RETRACT_START_TIME:
+                    print(f"t={elapsed:.2f}s — starting retract...")
+                    axisX.startScan(retract_direction)
+                    retract_started = True
+                    retract_start_clock = time.perf_counter()
 
             # Watch for a thermal fault at any point during the recording
             # window (not just during the retract) — the fault can trip
@@ -292,12 +305,15 @@ def run_trial(run_id,
 
             current_time = time.perf_counter()
             if current_time - last_print_time >= 1.0 / PRINTING_FREQUENCY:
-                print(f"{rows_written} frames logged... (t={current_time - start_time:.2f}s)")
+                sys.stdout.write(f"\r{rows_written} frames logged... (t={current_time - start_time:.2f}s)   ")
+                sys.stdout.flush()
                 last_print_time = current_time
 
             next_execution_time += 1.0 / READING_FREQUENCY
             sleep_time = max(0, next_execution_time - time.perf_counter())
             time.sleep(sleep_time)
+
+    print()
 
     # Check in case recording was terminated
     if retract_started and not retract_stopped:
